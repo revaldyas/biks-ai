@@ -128,4 +128,22 @@ describe("API route handlers", () => {
       close();
     }
   });
+
+  it("POST /api/review-opportunities requires country and businessTypes", async () => {
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/review-opportunities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country: "Singapore" }),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toBe("country and businessTypes are required");
+    } finally {
+      close();
+    }
+  });
 });

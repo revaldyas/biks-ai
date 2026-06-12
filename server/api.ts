@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
+import { discoverReviewOpportunities } from "./reviewOpportunities";
 
 const api = Router();
 
@@ -18,6 +19,28 @@ function sseHeaders(res: Response) {
 function sseSend(res: Response, data: object) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
+
+// ============================================================
+// POST /api/review-opportunities — Review-based opportunity discovery
+// ============================================================
+api.post("/api/review-opportunities", async (req: Request, res: Response) => {
+  const { country, businessTypes, memories } = req.body ?? {};
+
+  if (!country || !Array.isArray(businessTypes) || businessTypes.length === 0) {
+    return res.status(400).json({ error: "country and businessTypes are required" });
+  }
+
+  try {
+    const result = await discoverReviewOpportunities({
+      country,
+      businessTypes,
+      memories: Array.isArray(memories) ? memories : [],
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Review opportunity discovery failed" });
+  }
+});
 
 // ============================================================
 // POST /api/analyze-website — SSE streaming website analysis

@@ -1,6 +1,26 @@
 import { useState } from "react";
 import type { BusinessProfile, Lead, MemoryItem, Contact } from "../App";
 
+type ReviewOpportunity = {
+  businessName: string;
+  location: string;
+  sourceUrl: string;
+  rating: number | null;
+  reviewCount: number | null;
+  problemDetected: string;
+  painPointCategory: string;
+  matchedKeywords: string[];
+  reviewEvidence: string[];
+  moncolOpportunity: string;
+  opportunityScore: number;
+  memoriesUsed: string[];
+};
+
+type ReviewOpportunityResponse = {
+  sourceMode: "live" | "fallback";
+  results: ReviewOpportunity[];
+};
+
 interface Props {
   business: BusinessProfile;
   memories: MemoryItem[];
@@ -22,6 +42,9 @@ export default function AccountsStep({
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [findingContacts, setFindingContacts] = useState<number | null>(null);
+  const [reviewOpportunityLoading, setReviewOpportunityLoading] = useState(false);
+  const [reviewOpportunityError, setReviewOpportunityError] = useState("");
+  const [reviewOpportunityData, setReviewOpportunityData] = useState<ReviewOpportunityResponse | null>(null);
 
   const searchLeads = async () => {
     setSearching(true);
@@ -102,6 +125,32 @@ export default function AccountsStep({
       if (data.contacts) setContacts(data.contacts);
     } catch {}
     setFindingContacts(null);
+  };
+
+  const findReviewOpportunities = async () => {
+    setReviewOpportunityLoading(true);
+    setReviewOpportunityError("");
+
+    try {
+      const res = await fetch("/api/review-opportunities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          country: "Singapore",
+          businessTypes: ["spa", "wellness", "medical spa", "recovery center", "athletic recovery club", "resort spa"],
+          memories: memories.map(memory => memory.text),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to discover opportunities");
+      }
+      setReviewOpportunityData(data);
+    } catch (error: any) {
+      setReviewOpportunityError(error.message || "Failed to discover opportunities");
+    }
+
+    setReviewOpportunityLoading(false);
   };
 
   return (
@@ -209,6 +258,174 @@ export default function AccountsStep({
             {searching ? "Searching..." : "Search Leads"}
           </button>
         </div>
+
+        <div style={{
+          background: "#131925",
+          border: "1px solid #22304d",
+          borderRadius: 12,
+          padding: "18px 20px",
+          marginBottom: 24,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 6 }}>
+                Review-Based Opportunity Discovery
+              </div>
+              <div style={{ fontSize: 13, color: "#b9c8e8", lineHeight: 1.5, maxWidth: 720 }}>
+                Search Google Maps businesses, inspect public review complaints, and detect Moncol opportunities from water, dirty, and filter signals.
+              </div>
+            </div>
+            <button
+              onClick={findReviewOpportunities}
+              disabled={reviewOpportunityLoading}
+              style={{
+                background: "#d9e6ff",
+                color: "#10203a",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 16px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: reviewOpportunityLoading ? "not-allowed" : "pointer",
+                opacity: reviewOpportunityLoading ? 0.65 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {reviewOpportunityLoading ? "Scanning..." : "Find Review-Based Opportunities"}
+            </button>
+          </div>
+
+          {reviewOpportunityLoading && (
+            <p style={{ marginTop: 12, fontSize: 13, color: "#d9e6ff" }}>
+              Scanning public reviews for water, dirty, and filter signals...
+            </p>
+          )}
+
+          {reviewOpportunityError && (
+            <p style={{ marginTop: 12, fontSize: 13, color: "#f88a8a" }}>
+              {reviewOpportunityError}
+            </p>
+          )}
+        </div>
+
+        {reviewOpportunityData && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 4 }}>
+                  Review-Based Opportunities
+                </div>
+                <div style={{ fontSize: 12, color: "#7f8ca8" }}>
+                  Source mode: {reviewOpportunityData.sourceMode}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "#7f8ca8" }}>
+                {reviewOpportunityData.results.length} opportunities
+              </div>
+            </div>
+
+            {reviewOpportunityData.results.length === 0 ? (
+              <div style={{ background: "#161616", border: "1px solid #2a2a2a", borderRadius: 12, padding: 24 }}>
+                <p style={{ color: "#777", fontSize: 14, margin: 0 }}>
+                  No review-based opportunities found for the current search.
+                </p>
+              </div>
+            ) : (
+              reviewOpportunityData.results.map((opportunity, idx) => (
+                <div key={`${opportunity.businessName}-${idx}`} style={{
+                  background: "#121823",
+                  border: "1px solid #24324f",
+                  borderRadius: 12,
+                  padding: "18px 20px",
+                  marginBottom: 10,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#f0f4ff", marginBottom: 4 }}>
+                        {opportunity.businessName}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#7f8ca8" }}>
+                        {opportunity.location}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <ScoreBadge score={opportunity.opportunityScore} />
+                      <span style={{ fontSize: 11, color: "#7f8ca8" }}>
+                        {opportunity.rating ? `${opportunity.rating.toFixed(1)} stars` : "Rating n/a"}
+                        {typeof opportunity.reviewCount === "number" ? ` • ${opportunity.reviewCount} reviews` : ""}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                    <OpportunityInfo label="Problem Detected" value={opportunity.problemDetected} />
+                    <OpportunityInfo label="Pain Point" value={opportunity.painPointCategory} />
+                    <OpportunityInfo label="Moncol Opportunity" value={opportunity.moncolOpportunity} />
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 8 }}>
+                      Matched Keywords
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {opportunity.matchedKeywords.map((keyword) => (
+                        <span key={keyword} style={{
+                          fontSize: 11, color: "#d9e6ff", padding: "4px 8px",
+                          background: "#1b2740", border: "1px solid #2c3b5f", borderRadius: 999,
+                        }}>
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 8 }}>
+                      Review Evidence
+                    </div>
+                    {opportunity.reviewEvidence.map((evidence, evidenceIdx) => (
+                      <div key={evidenceIdx} style={{
+                        fontSize: 12, color: "#dbe6ff", lineHeight: 1.5,
+                        background: "#182133", border: "1px solid #24324f", borderRadius: 8,
+                        padding: "8px 10px", marginBottom: 6,
+                      }}>
+                        "{evidence}"
+                      </div>
+                    ))}
+                  </div>
+
+                  {opportunity.memoriesUsed.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 8 }}>
+                        Memories Used
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {opportunity.memoriesUsed.map((memory, memoryIdx) => (
+                          <span key={memoryIdx} style={{
+                            fontSize: 11, color: "#d9e6ff", padding: "4px 8px",
+                            background: "#1b2740", border: "1px solid #2c3b5f", borderRadius: 999,
+                          }}>
+                            {memory}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <a href={opportunity.sourceUrl} target="_blank" rel="noopener" style={{
+                    display: "inline-block",
+                    marginTop: 12,
+                    fontSize: 12,
+                    color: "#8db4ff",
+                    textDecoration: "none",
+                  }}>
+                    Open Source →
+                  </a>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* Leads */}
         {leads.length === 0 && !searching && (
@@ -415,6 +632,19 @@ function ScoreBadge({ score }: { score: number }) {
     }}>
       {score}/5
     </span>
+  );
+}
+
+function OpportunityInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ background: "#182133", border: "1px solid #24324f", borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#7d97d9", marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12, color: "#dbe6ff", lineHeight: 1.5 }}>
+        {value}
+      </div>
+    </div>
   );
 }
 
