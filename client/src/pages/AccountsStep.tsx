@@ -38,6 +38,7 @@ export default function AccountsStep({
       const scored = (data.results || []).map((r: any) => ({
         ...r,
         name: r.title,
+        email: r.email || null,
         fitScore: scoreResult(r, cat.name, city, memories),
         category: cat.name,
         city,
@@ -261,6 +262,11 @@ export default function AccountsStep({
               <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "#5b8af5", textDecoration: "none" }}>
                 {lead.url}
               </a>
+              {lead.email && (
+                <div style={{ marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: "#3ecf8e" }}>✉ {lead.email}</span>
+                </div>
+              )}
 
               {/* Actions */}
               {lead.status === "pending" && (

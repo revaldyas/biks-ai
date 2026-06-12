@@ -35,6 +35,7 @@ export interface Lead {
   city: string;
   status: "pending" | "accepted" | "rejected";
   rejectionReason?: string;
+  email?: string | null;
 }
 
 export interface MemoryItem {

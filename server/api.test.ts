@@ -57,7 +57,7 @@ describe("API route handlers", () => {
     }
   });
 
-  it("POST /api/send-email requires to, subject, and html", async () => {
+  it("POST /api/send-email requires subject and html", async () => {
     const app = createTestApp();
     const { port, close } = await startServer(app);
 
@@ -65,11 +65,11 @@ describe("API route handlers", () => {
       const res = await fetch(`http://localhost:${port}/api/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: "test@test.com" }),
+        body: JSON.stringify({ subject: "test" }),
       });
       expect(res.status).toBe(400);
       const data = await res.json();
-      expect(data.error).toBe("to, subject, and html are required");
+      expect(data.error).toBe("subject and html are required");
     } finally {
       close();
     }

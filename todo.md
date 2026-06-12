@@ -63,3 +63,10 @@
 - [x] All styling via inline CSS (no Tailwind/external CSS)
 - [x] Custom scrollbar styling
 - [x] Animations (fadeIn, pulse, spin)
+
+## Updates - Exa Email & Resend Config
+- [x] Exa search should also fetch company email from results
+- [x] Configure Resend with fixed from: nura@biks.ai
+- [x] Configure Resend with fixed to: ngurah.linggih@gmail.com
+- [x] Update send-email endpoint to use fixed recipient
+- [x] Update frontend to show fixed recipient instead of input field

@@ -15,7 +15,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [tab, setTab] = useState<"account" | "email" | "meeting">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
-  const [emailTo, setEmailTo] = useState("");
+  const emailTo = "ngurah.linggih@gmail.com";
   const [emailSending, setEmailSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
@@ -76,7 +76,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   };
 
   const sendEmail = async () => {
-    if (!emailTo.trim() || !brief) return;
+    if (!brief) return;
     setEmailSending(true);
     setEmailError("");
     try {
@@ -84,7 +84,6 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: emailTo.trim(),
           subject: brief.outreachEmailSubject,
           html: brief.outreachEmailBody.replace(/\n/g, "<br/>"),
         }),
@@ -280,25 +279,22 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       <span style={{ fontSize: 14, color: "#3ecf8e" }}>Email sent successfully!</span>
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <input
-                        value={emailTo}
-                        onChange={(e) => setEmailTo(e.target.value)}
-                        placeholder="recipient@company.com"
-                        style={{
-                          flex: 1, background: "#1c1c1c", border: "1px solid #2a2a2a",
-                          borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#f0f0f0",
-                          outline: "none", fontFamily: "'Inter', sans-serif",
-                        }}
-                      />
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{
+                        flex: 1, background: "#1c1c1c", border: "1px solid #2a2a2a",
+                        borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#f0f0f0",
+                        fontFamily: "'Inter', sans-serif",
+                      }}>
+                        To: {emailTo}
+                      </div>
                       <button
                         onClick={sendEmail}
-                        disabled={emailSending || !emailTo.trim()}
+                        disabled={emailSending}
                         style={{
                           background: "#5b8af5", color: "#fff", border: "none",
                           borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600,
-                          cursor: emailSending || !emailTo.trim() ? "not-allowed" : "pointer",
-                          opacity: emailSending || !emailTo.trim() ? 0.5 : 1,
+                          cursor: emailSending ? "not-allowed" : "pointer",
+                          opacity: emailSending ? 0.5 : 1,
                           fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap",
                         }}
                       >

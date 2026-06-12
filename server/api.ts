@@ -283,6 +283,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         category: "company",
         numResults,
         contents: {
+          text: { maxCharacters: 2000 },
           highlights: true,
           summary: true,
         },
@@ -295,12 +296,18 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     }
 
     const data: any = await exaRes.json();
-    const results = (data.results || []).map((r: any) => ({
-      title: r.title || "Unknown Business",
-      url: r.url || "#",
-      summary: r.summary || r.highlights?.[0] || "",
-      highlights: r.highlights || [],
-    }));
+    const results = (data.results || []).map((r: any) => {
+      // Extract email from text/highlights if available
+      const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
+      const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+      return {
+        title: r.title || "Unknown Business",
+        url: r.url || "#",
+        summary: r.summary || r.highlights?.[0] || "",
+        highlights: r.highlights || [],
+        email: emailMatch ? emailMatch[0] : null,
+      };
+    });
 
     return res.json({ results });
   } catch (e: any) {
@@ -487,15 +494,11 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
     return res.status(500).json({ ok: false, error: "Resend not configured" });
   }
 
-  const { to, subject, html, from } = req.body;
-  if (!to || !subject || !html) {
-    return res.status(400).json({ ok: false, error: "to, subject, and html are required" });
-  }
-
-  // Basic email validation
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(to)) {
-    return res.status(400).json({ ok: false, error: "Invalid email address" });
+  const { subject, html, from } = req.body;
+  // Fixed recipient as configured
+  const to = "ngurah.linggih@gmail.com";
+  if (!subject || !html) {
+    return res.status(400).json({ ok: false, error: "subject and html are required" });
   }
 
   try {
@@ -506,7 +509,7 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: from || process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+        from: process.env.RESEND_FROM_EMAIL || "nura@biks.ai",
         to,
         subject,
         html,
