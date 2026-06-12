@@ -13,7 +13,7 @@ describe("Resend API key validation", () => {
     expect(from).toBe("nura@biks.ai");
   });
 
-  it("Resend API key can authenticate", async () => {
+  it("Resend API key can authenticate", { timeout: 15000 }, async () => {
     const key = process.env.RESEND_API_KEY;
     const res = await fetch("https://api.resend.com/domains", {
       headers: { Authorization: `Bearer ${key}` },

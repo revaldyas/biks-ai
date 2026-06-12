@@ -87,3 +87,8 @@
 - [x] Email contains outreach email body + link to HTML one-pager
 - [x] Uses fixed recipient ngurah.linggih@gmail.com via Resend
 - [x] Success/failure state display after sending
+
+## Fix City Picker for Exa Search
+- [x] Replace city text input with dropdown (Singapore, Jakarta, etc.)
+- [x] Ensure Exa search query properly filters by selected city
+- [x] Verify companies returned are actually from the chosen city

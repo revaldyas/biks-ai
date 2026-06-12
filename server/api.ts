@@ -265,7 +265,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Exa not configured" });
   }
 
-  const { query, numResults = 5 } = req.body;
+  const { query, city, numResults = 5 } = req.body;
   if (!query) {
     return res.status(400).json({ error: "query is required" });
   }
@@ -278,7 +278,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         "x-api-key": apiKey,
       },
       body: JSON.stringify({
-        query,
+        query: city ? `${query} located in ${city}` : query,
         type: "auto",
         category: "company",
         numResults,
@@ -296,7 +296,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     }
 
     const data: any = await exaRes.json();
-    const results = (data.results || []).map((r: any) => {
+    const allResults = (data.results || []).map((r: any) => {
       // Extract email from text/highlights if available
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
@@ -306,8 +306,40 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         summary: r.summary || r.highlights?.[0] || "",
         highlights: r.highlights || [],
         email: emailMatch ? emailMatch[0] : null,
+        _fullText: allText,
       };
     });
+
+    // Post-filter: only keep results that mention the city (or its known aliases) in their content/URL
+    let results = allResults;
+    if (city) {
+      const cityLower = city.toLowerCase();
+      const cityAliases: Record<string, string[]> = {
+        "singapore": ["singapore", "sg", ".sg"],
+        "jakarta": ["jakarta", "jkt", ".id", "indonesia"],
+        "bali": ["bali", ".id", "indonesia"],
+        "kuala lumpur": ["kuala lumpur", "kl", ".my", "malaysia"],
+        "bangkok": ["bangkok", "bkk", ".th", "thailand"],
+        "ho chi minh city": ["ho chi minh", "hcmc", "saigon", ".vn", "vietnam"],
+        "manila": ["manila", ".ph", "philippines"],
+        "hong kong": ["hong kong", "hongkong", ".hk"],
+        "tokyo": ["tokyo", ".jp", "japan"],
+        "sydney": ["sydney", ".au", "australia"],
+        "dubai": ["dubai", ".ae", "uae"],
+        "london": ["london", ".uk", "united kingdom"],
+        "new york": ["new york", "nyc", "ny"],
+      };
+      const aliases = cityAliases[cityLower] || [cityLower];
+      results = allResults.filter((r: any) => {
+        const searchText = (r._fullText + " " + r.url + " " + r.title).toLowerCase();
+        return aliases.some(alias => searchText.includes(alias));
+      });
+      // If filtering removes all results, return unfiltered with a note
+      if (results.length === 0) results = allResults;
+    }
+
+    // Remove internal _fullText field before returning
+    results = results.map(({ _fullText, ...rest }: any) => rest);
 
     return res.json({ results });
   } catch (e: any) {

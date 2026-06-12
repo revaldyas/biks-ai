@@ -19,6 +19,22 @@ export default function AccountsStep({
   const [selectedCategory, setSelectedCategory] = useState(0);
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
+
+  const cityOptions = [
+    "Singapore",
+    "Jakarta",
+    "Bali",
+    "Kuala Lumpur",
+    "Bangkok",
+    "Ho Chi Minh City",
+    "Manila",
+    "Hong Kong",
+    "Tokyo",
+    "Sydney",
+    "Dubai",
+    "London",
+    "New York",
+  ];
   const [rejectModal, setRejectModal] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [findingContacts, setFindingContacts] = useState<number | null>(null);
@@ -26,13 +42,15 @@ export default function AccountsStep({
   const searchLeads = async () => {
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
-    const query = cat.searchQueries?.[0] || `${cat.name} ${city} premium`;
+    const baseQuery = cat.searchQueries?.[0] || `${cat.name} premium`;
+    // Ensure city is prominently in the query for location filtering
+    const query = `${baseQuery} in ${city}`;
 
     try {
       const res = await fetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: `${query} ${city}`, numResults: 5 }),
+        body: JSON.stringify({ query, city, numResults: 5 }),
       });
       const data = await res.json();
       const scored = (data.results || []).map((r: any) => ({
@@ -139,11 +157,11 @@ export default function AccountsStep({
 
         <div style={{ height: 1, background: "#1e1e1e", margin: "16px 0" }} />
 
-        {/* City input */}
+        {/* City dropdown */}
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
           CITY
         </div>
-        <input
+        <select
           value={city}
           onChange={(e) => setCity(e.target.value)}
           style={{
@@ -152,8 +170,19 @@ export default function AccountsStep({
             borderRadius: 8, padding: "9px 12px",
             fontSize: 13, color: "#f0f0f0", outline: "none",
             fontFamily: "'Inter', sans-serif",
+            cursor: "pointer",
+            appearance: "none",
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "right 12px center",
           }}
-        />
+        >
+          {cityOptions.map(c => (
+            <option key={c} value={c} style={{ background: "#1a1a1a", color: "#f0f0f0" }}>
+              {c}
+            </option>
+          ))}
+        </select>
 
         <div style={{ height: 1, background: "#1e1e1e", margin: "16px 0" }} />
 
