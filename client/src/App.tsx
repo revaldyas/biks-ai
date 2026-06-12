@@ -1,7 +1,6 @@
 import { useState } from "react";
 import HeroStep from "./pages/HeroStep";
 import DashboardStep from "./pages/DashboardStep";
-import MemoryStep from "./pages/MemoryStep";
 import AccountsStep from "./pages/AccountsStep";
 import BriefStep from "./pages/BriefStep";
 import Navbar from "./components/Navbar";
@@ -81,6 +80,7 @@ function App() {
   const [brief, setBrief] = useState<MeetingBrief | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [salesKit, setSalesKit] = useState<SalesKit | null>(null);
+  const [initialCategory, setInitialCategory] = useState(0);
 
   const handleReset = () => {
     setStep(1);
@@ -91,6 +91,7 @@ function App() {
     setBrief(null);
     setContacts([]);
     setSalesKit(null);
+    setInitialCategory(0);
   };
 
   return (
@@ -111,18 +112,12 @@ function App() {
       {step === 2 && business && (
         <DashboardStep
           business={business}
-          onNext={() => setStep(3)}
-        />
-      )}
-      {step === 3 && (
-        <MemoryStep
           memories={memories}
           setMemories={setMemories}
-          onNext={() => setStep(4)}
-          onBack={() => setStep(2)}
+          onSelectCategory={(i) => { setInitialCategory(i); setStep(3); }}
         />
       )}
-      {step === 4 && business && (
+      {step === 3 && business && (
         <AccountsStep
           business={business}
           memories={memories}
@@ -131,11 +126,12 @@ function App() {
           setLeads={setLeads}
           contacts={contacts}
           setContacts={setContacts}
-          onSelectLead={(lead) => { setSelectedLead(lead); setStep(5); }}
-          onBack={() => setStep(3)}
+          onSelectLead={(lead) => { setSelectedLead(lead); setStep(4); }}
+          onBack={() => setStep(2)}
+          initialCategory={initialCategory}
         />
       )}
-      {step === 5 && business && selectedLead && (
+      {step === 4 && business && selectedLead && (
         <BriefStep
           business={business}
           lead={selectedLead}
@@ -145,7 +141,7 @@ function App() {
           contacts={contacts}
           salesKit={salesKit}
           setSalesKit={setSalesKit}
-          onBack={() => setStep(4)}
+          onBack={() => setStep(3)}
         />
       )}
     </div>

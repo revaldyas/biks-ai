@@ -1,150 +1,243 @@
-import type { BusinessProfile } from "../App";
+import { useState, useEffect } from "react";
+import type { BusinessProfile, MemoryItem } from "../App";
 
 interface Props {
   business: BusinessProfile;
-  onNext: () => void;
+  memories: MemoryItem[];
+  setMemories: (m: MemoryItem[]) => void;
+  onSelectCategory: (index: number) => void;
 }
 
-export default function DashboardStep({ business, onNext }: Props) {
+export default function DashboardStep({ business, memories, setMemories, onSelectCategory }: Props) {
+  const [memoryInput, setMemoryInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [fetching, setFetching] = useState(true);
+
+  useEffect(() => {
+    fetchMemories();
+  }, []);
+
+  const fetchMemories = async () => {
+    setFetching(true);
+    try {
+      const res = await fetch("/api/mem0");
+      const data = await res.json();
+      if (data.available && Array.isArray(data.items)) {
+        setMemories(data.items);
+      }
+    } catch {}
+    setFetching(false);
+  };
+
+  const addMemory = async () => {
+    if (!memoryInput.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/mem0", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: memoryInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setMemories([...memories, { id: data.id, text: memoryInput.trim() }]);
+        setSavedMsg(memoryInput.trim());
+        setMemoryInput("");
+        setTimeout(() => setSavedMsg(""), 3000);
+      }
+    } catch {}
+    setSaving(false);
+  };
+
   return (
-    <div style={{ padding: "0 32px 48px", animation: "fadeIn 0.3s ease" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "24px 0 20px" }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f0f0f0" }}>{business.companyName}</h1>
-          <p style={{ fontSize: 13, color: "#666", marginTop: 4 }}>{business.website}</p>
-        </div>
-        <button
-          onClick={onNext}
-          style={{
-            background: "#f0f0f0",
-            color: "#0f0f0f",
-            border: "none",
-            borderRadius: 8,
-            padding: "12px 22px",
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          Next: Add Memory →
-        </button>
-      </div>
+    <div style={{ minHeight: "calc(100vh - 57px)", display: "flex", flexDirection: "column", animation: "fadeIn 0.3s ease" }}>
+      {/* Main content */}
+      <div style={{ flex: 1, padding: "28px 32px 120px", overflowY: "auto" }}>
+        {/* 4-panel grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {/* Company Summary */}
+          <div style={{
+            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            padding: "28px 28px 32px", minHeight: 220,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M7 7h10M7 12h10M7 17h6" />
+              </svg>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Company Summary</h3>
+            </div>
+            <p style={{ fontSize: 14, color: "#999", lineHeight: 1.7, margin: 0 }}>{business.summary}</p>
+          </div>
 
-      {/* Bento Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, paddingTop: 8 }}>
-        {/* Summary Card */}
-        <div style={{ background: "#1c1c1e", border: "1px solid #2a2a2a", borderRadius: 16, padding: "28px 30px 32px" }}>
-          <DashIcon type="summary" />
-          <h3 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.2, marginBottom: 12 }}>
-            Company Summary
-          </h3>
-          <p style={{ fontSize: 15, color: "#888", lineHeight: 1.75 }}>{business.summary}</p>
+          {/* Core Value Proposition */}
+          <div style={{
+            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            padding: "28px 28px 32px", minHeight: 220,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Core Value Proposition</h3>
+            </div>
+            <p style={{ fontSize: 14, color: "#999", lineHeight: 1.7, margin: 0 }}>{business.valueProposition}</p>
+          </div>
+
+          {/* Current Customer Segments */}
+          <div style={{
+            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            padding: "28px 28px 32px", minHeight: 220,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>Current Customer Segments</h3>
+            </div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {business.currentSegments.map((s, i) => (
+                <li key={i} style={{
+                  fontSize: 14, color: "#999", padding: "8px 0",
+                  display: "flex", alignItems: "center", gap: 10,
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#555", flexShrink: 0 }} />
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* New Business Opportunities */}
+          <div style={{
+            background: "#161616", border: "1px solid #2a2a2a", borderRadius: 14,
+            padding: "28px 28px 32px", minHeight: 220,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f0", margin: 0 }}>New Business Opportunities</h3>
+            </div>
+            <p style={{ fontSize: 12, color: "#666", marginBottom: 16, marginLeft: 30 }}>
+              Select one opportunity to generate target accounts
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {business.expansionCategories.map((cat, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSelectCategory(i)}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    width: "100%", textAlign: "left",
+                    padding: "12px 14px",
+                    background: "#1c1c1c", border: "1px solid #2a2a2a",
+                    borderRadius: 8, cursor: "pointer",
+                    transition: "border-color 0.15s ease, background 0.15s ease",
+                    fontFamily: "'Inter', sans-serif",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3a3a3a"; e.currentTarget.style.background = "#222"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#2a2a2a"; e.currentTarget.style.background = "#1c1c1c"; }}
+                >
+                  <span style={{ fontSize: 14, color: "#ccc", fontWeight: 400 }}>{cat.name}</span>
+                  <span style={{ color: "#555", fontSize: 16 }}>→</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Value Proposition Card */}
-        <div style={{ background: "#1c1c1e", border: "1px solid #2a2a2a", borderRadius: 16, padding: "28px 30px 32px" }}>
-          <DashIcon type="value" />
-          <h3 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.2, marginBottom: 12 }}>
-            Value Proposition
-          </h3>
-          <p style={{ fontSize: 15, color: "#888", lineHeight: 1.75 }}>{business.valueProposition}</p>
-        </div>
-
-        {/* Products Card */}
-        <div style={{ background: "#1c1c1e", border: "1px solid #2a2a2a", borderRadius: 16, padding: "28px 30px 32px" }}>
-          <DashIcon type="products" />
-          <h3 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.2, marginBottom: 12 }}>
-            Products & Services
-          </h3>
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {business.products.map((p, i) => (
-              <li key={i} style={{
-                fontSize: 15, color: "#888", padding: "11px 0",
-                borderBottom: i < business.products.length - 1 ? "1px solid #242424" : "none",
-                display: "flex", alignItems: "center", gap: 12, lineHeight: 1.4,
+        {/* Memory chips display */}
+        {memories.length > 0 && (
+          <div style={{ marginTop: 20, display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {memories.map(m => (
+              <span key={m.id} style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                borderRadius: 20, padding: "4px 12px",
+                fontSize: 11, fontWeight: 500,
+                background: "#1a2e24", border: "1px solid #2a4a37", color: "#3ecf8e",
               }}>
-                <span style={{ color: "#555", fontSize: 20, flexShrink: 0 }}>•</span>
-                {p}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Current Segments Card */}
-        <div style={{ background: "#1c1c1e", border: "1px solid #2a2a2a", borderRadius: 16, padding: "28px 30px 32px" }}>
-          <DashIcon type="segments" />
-          <h3 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.2, marginBottom: 12 }}>
-            Current Segments
-          </h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {business.currentSegments.map((s, i) => (
-              <span key={i} style={{
-                background: "#1c1c1c",
-                border: "1px solid #2a2a2a",
-                borderRadius: 6,
-                padding: "3px 10px",
-                fontSize: 12,
-                color: "#666",
-              }}>
-                {s}
+                {m.text}
               </span>
             ))}
           </div>
-          {/* Proof Points */}
-          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#888", marginTop: 20, marginBottom: 8 }}>Proof Points</h4>
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {business.proofPoints.map((p, i) => (
-              <li key={i} style={{
-                fontSize: 14, color: "#777", padding: "8px 0",
-                borderBottom: i < business.proofPoints.length - 1 ? "1px solid #242424" : "none",
-                display: "flex", alignItems: "center", gap: 10,
-              }}>
-                <span style={{ color: "#3ecf8e", fontSize: 12 }}>✓</span>
-                {p}
-              </li>
-            ))}
-          </ul>
-        </div>
+        )}
       </div>
 
-      {/* Expansion Opportunities */}
-      <div style={{ marginTop: 20 }}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: "#f0f0f0", marginBottom: 14 }}>
-          Expansion Opportunities
-        </h3>
-        {business.expansionCategories.map((cat, i) => (
-          <div key={i} style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "14px 16px",
-            background: "#242424", border: "1px solid #2e2e2e",
-            borderRadius: 10, marginBottom: 6,
+      {/* Sticky bottom memory bar */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: "#161616", borderTop: "1px solid #2a2a2a",
+        padding: "16px 32px",
+        display: "flex", alignItems: "center", gap: 16,
+        zIndex: 100,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: "50%",
+            background: "#2a2a2a", display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <div>
-              <span style={{ fontSize: 15, color: "#f0f0f0", fontWeight: 400 }}>{cat.name}</span>
-              <p style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{cat.salesAngle}</p>
-            </div>
-            <span style={{ color: "#555", fontSize: 18 }}>→</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f0f0f0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#f0f0f0" }}>Add Business Context to Memory</div>
+            <div style={{ fontSize: 12, color: "#666" }}>Optional: add preferences, ICP notes, past customers, excluded segments, or sales context</div>
+          </div>
+        </div>
 
-function DashIcon({ type }: { type: string }) {
-  return (
-    <div style={{
-      width: 52, height: 52, borderRadius: 14, background: "#2a2a2a",
-      display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16,
-    }}>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        {type === "summary" && <><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></>}
-        {type === "value" && <><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></>}
-        {type === "products" && <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></>}
-        {type === "segments" && <><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>}
-      </svg>
+        <div style={{ flex: 1, display: "flex", gap: 10 }}>
+          <input
+            value={memoryInput}
+            onChange={(e) => setMemoryInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !saving) addMemory(); }}
+            placeholder="e.g. Prefer premium wellness operators; avoid small studios without water facilities"
+            style={{
+              flex: 1,
+              background: "#1c1c1c", border: "1px solid #2a2a2a",
+              borderRadius: 8, padding: "11px 14px",
+              fontSize: 13, color: "#f0f0f0", outline: "none",
+              fontFamily: "'Inter', sans-serif",
+            }}
+          />
+          <button
+            onClick={addMemory}
+            disabled={saving || !memoryInput.trim()}
+            style={{
+              background: "#f0f0f0", color: "#0f0f0f",
+              border: "none", borderRadius: 8,
+              padding: "10px 20px", fontSize: 14, fontWeight: 600,
+              cursor: saving ? "not-allowed" : "pointer",
+              opacity: saving || !memoryInput.trim() ? 0.5 : 1,
+              fontFamily: "'Inter', sans-serif",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+
+        {/* Saved notification */}
+        {savedMsg && (
+          <div style={{
+            position: "absolute", top: -40, right: 32,
+            background: "#1a2e24", border: "1px solid #2a4a37",
+            borderRadius: 20, padding: "6px 14px",
+            fontSize: 12, color: "#3ecf8e",
+            animation: "fadeIn 0.2s ease",
+          }}>
+            Memory saved: {savedMsg.length > 30 ? savedMsg.slice(0, 30) + "..." : savedMsg}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -92,3 +92,12 @@
 - [x] Replace city text input with dropdown (Singapore, Jakarta, etc.)
 - [x] Ensure Exa search query properly filters by selected city
 - [x] Verify companies returned are actually from the chosen city
+
+## Dashboard Redesign (Match Reference Screenshot)
+- [x] 4-panel grid layout: Company Summary, Core Value Proposition, Current Customer Segments, New Business Opportunities
+- [x] Sticky bottom memory bar with text input and Save button
+- [x] New Business Opportunities as clickable list items with arrow → go to Target Accounts
+- [x] Remove separate Memory step (Step 3) from wizard flow
+- [x] Adjust wizard flow: Hero → Dashboard (with memory) → Target Accounts → Sales Kit
+- [x] Navbar shows website URL + Reset button on right side
+- [x] Memory saved toast/notification on save

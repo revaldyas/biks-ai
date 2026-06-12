@@ -9,9 +9,8 @@ interface NavbarProps {
 
 const steps = [
   { num: 2, label: "Analysis" },
-  { num: 3, label: "Memory" },
-  { num: 4, label: "Accounts" },
-  { num: 5, label: "Brief" },
+  { num: 3, label: "Accounts" },
+  { num: 4, label: "Brief" },
 ];
 
 export default function Navbar({ currentStep, onStepClick, onReset, website }: NavbarProps) {
@@ -95,13 +94,12 @@ export default function Navbar({ currentStep, onStepClick, onReset, website }: N
         <button
           onClick={onReset}
           style={{
-            background: "#1c1c1c",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            padding: "6px 14px",
-            fontSize: 12,
-            fontWeight: 600,
-            color: "#f0f0f0",
+            background: "none",
+            border: "none",
+            padding: "6px 0",
+            fontSize: 13,
+            fontWeight: 500,
+            color: "#888",
             cursor: "pointer",
             fontFamily: "'Inter', sans-serif",
           }}

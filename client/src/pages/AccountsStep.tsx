@@ -11,12 +11,13 @@ interface Props {
   setContacts: (c: Contact[]) => void;
   onSelectLead: (lead: Lead) => void;
   onBack: () => void;
+  initialCategory?: number;
 }
 
 export default function AccountsStep({
-  business, memories, setMemories, leads, setLeads, contacts, setContacts, onSelectLead, onBack
+  business, memories, setMemories, leads, setLeads, contacts, setContacts, onSelectLead, onBack, initialCategory = 0
 }: Props) {
-  const [selectedCategory, setSelectedCategory] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
 
@@ -132,7 +133,7 @@ export default function AccountsStep({
         display: "flex", flexDirection: "column",
       }}>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-          STEP 4
+          STEP 2
         </div>
         <div style={{ fontSize: 16, fontWeight: 600, color: "#f0f0f0", marginBottom: 20 }}>
           Target Accounts
@@ -204,7 +205,7 @@ export default function AccountsStep({
         <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid #1e1e1e" }}>
           <button onClick={onBack} style={{
             background: "none", border: "none", color: "#3a3a3a", fontSize: 13, cursor: "pointer",
-          }}>← Back to Memory</button>
+          }}>← Back to Analysis</button>
         </div>
       </div>
 

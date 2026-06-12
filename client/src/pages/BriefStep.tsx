@@ -204,7 +204,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         display: "flex", flexDirection: "column",
       }}>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
-          STEP 5
+          STEP 3
         </div>
         <div style={{ fontSize: 16, fontWeight: 600, color: "#f0f0f0", marginBottom: 20 }}>
           Sales Kit
@@ -273,7 +273,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         <div style={{ marginTop: "auto", paddingTop: 20, borderTop: "1px solid #1e1e1e" }}>
           <button onClick={onBack} style={{
             background: "none", border: "none", color: "#3a3a3a", fontSize: 13, cursor: "pointer",
-          }}>← Back to Accounts</button>
+          }}>← Back to Target Accounts</button>
         </div>
       </div>
 
