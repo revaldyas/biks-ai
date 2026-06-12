@@ -114,3 +114,9 @@
 - [x] Add company summary to lead cards
 - [x] Add LinkedIn link to lead cards
 - [x] Add location/city to lead cards
+
+## Brief Page Enhancements
+- [x] Auto-fetch company contacts (decision makers: CEO, Founder, Director) via Exa when entering Brief page
+- [x] Display contacts section in Account Brief tab below Fit Rationale
+- [x] Marketing Kit email: send as native HTML email (not link to one-pager)
+- [x] Marketing Kit email design: modern, Biks.ai themed, accurate data from selected company

@@ -8,12 +8,13 @@ interface Props {
   brief: MeetingBrief | null;
   setBrief: (b: MeetingBrief | null) => void;
   contacts: Contact[];
+  setContacts: (c: Contact[]) => void;
   salesKit: SalesKit | null;
   setSalesKit: (k: SalesKit | null) => void;
   onBack: () => void;
 }
 
-export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, salesKit, setSalesKit, onBack }: Props) {
+export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, setContacts, salesKit, setSalesKit, onBack }: Props) {
   const [tab, setTab] = useState<"account" | "email" | "meeting" | "kit">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
@@ -29,7 +30,23 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
   useEffect(() => {
     if (!brief) generateBrief();
-  }, []);
+    // Always fetch contacts for the current lead
+    fetchContacts();
+  }, [lead.name]);
+
+  const fetchContacts = async () => {
+    try {
+      const res = await fetch("/api/find-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadName: lead.name, city: lead.city }),
+      });
+      const data = await res.json();
+      if (data.contacts && data.contacts.length > 0) {
+        setContacts(data.contacts);
+      }
+    } catch {}
+  };
 
   const generateBrief = async () => {
     setLoading(true);
@@ -163,16 +180,14 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setKitEmailSending(true);
     setKitEmailError("");
     try {
-      const onePagerLink = salesKit.onePagerUrl
-        ? `<br/><br/><hr style="border:none;border-top:1px solid #ddd;margin:24px 0;"/><p style="font-size:13px;color:#666;">📄 <strong>View the full Marketing One-Pager:</strong><br/><a href="${window.location.origin}${salesKit.onePagerUrl}" style="color:#5b8af5;">${window.location.origin}${salesKit.onePagerUrl}</a></p>`
-        : "";
-      const htmlBody = salesKit.outreachEmailBody.replace(/\n/g, "<br/>") + onePagerLink;
-      const res = await fetch("/api/send-email", {
+      const res = await fetch("/api/send-kit-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subject: salesKit.outreachEmailSubject,
-          html: htmlBody,
+          business,
+          lead,
+          salesKit,
+          contacts,
         }),
       });
       const data = await res.json();
@@ -337,6 +352,63 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
               <div style={{ animation: "fadeIn 0.3s ease" }}>
                 <Section title="Account Brief" content={brief.accountBrief} />
                 <Section title="Fit Rationale" content={brief.fitRationale} />
+                {/* Company Contacts - Decision Makers */}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                    COMPANY CONTACTS
+                  </div>
+                  {contacts.length > 0 ? (
+                    <div style={{ background: "#1c1c1c", border: "1px solid #2a2a2a", borderRadius: 8, padding: 16 }}>
+                      {contacts.map((c, i) => (
+                        <div key={i} style={{
+                          display: "flex", alignItems: "center", gap: 12,
+                          padding: "10px 0",
+                          borderBottom: i < contacts.length - 1 ? "1px solid #222" : "none",
+                        }}>
+                          <div style={{
+                            width: 32, height: 32, borderRadius: "50%",
+                            background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
+                          }}>
+                            {(c.name || "?").charAt(0)}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 500, color: "#f0f0f0" }}>{c.name}</div>
+                            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{c.title}</div>
+                          </div>
+                          {c.linkedinUrl && (
+                            <a
+                              href={c.linkedinUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                fontSize: 11, color: "#5b8af5", textDecoration: "none",
+                                padding: "4px 10px", border: "1px solid #5b8af533",
+                                borderRadius: 4, fontWeight: 500,
+                              }}
+                            >
+                              LinkedIn ↗
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: "#1c1c1c", border: "1px solid #2a2a2a",
+                      borderRadius: 8, padding: "20px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 13, color: "#555" }}>Searching for decision makers...</div>
+                      <div style={{
+                        width: 16, height: 16, border: "2px solid #5b8af5",
+                        borderTopColor: "transparent", borderRadius: "50%",
+                        animation: "spin 1s linear infinite",
+                        margin: "10px auto 0",
+                      }} />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -638,7 +710,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               </button>
                             </div>
                             <p style={{ fontSize: 11, color: "#555", marginTop: 8 }}>
-                              Sends outreach email + link to the HTML marketing one-pager
+                              Sends a branded native HTML email with synergies, contacts, and proposal link
                             </p>
                             {kitEmailError && (
                               <p style={{ fontSize: 12, color: "#f5454a", marginTop: 8 }}>{kitEmailError}</p>

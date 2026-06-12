@@ -990,4 +990,146 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================
+// POST /api/send-kit-email — Send native HTML marketing email via Resend
+// ============================================================
+api.post("/api/send-kit-email", async (req: Request, res: Response) => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, error: "Resend not configured" });
+  }
+
+  const { business, lead, salesKit, contacts } = req.body;
+  if (!business || !lead || !salesKit) {
+    return res.status(400).json({ ok: false, error: "business, lead, and salesKit are required" });
+  }
+
+  const to = "ngurah.linggih@gmail.com";
+  const subject = salesKit.outreachEmailSubject || `${business.companyName} × ${lead.name} — Partnership Opportunity`;
+
+  // Build native HTML email with Biks.ai dark theme
+  const synergiesHtml = (salesKit.synergies || []).map((s: any) => `
+    <tr>
+      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.sellerProduct}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.prospectPain}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#999;font-style:italic;">${s.evidence}</td>
+    </tr>
+  `).join("");
+
+  const contactsHtml = (contacts || []).length > 0 ? `
+    <div style="margin-top:24px;padding:20px;background:#161616;border:1px solid #2a2a2a;border-radius:8px;">
+      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5b8af5;margin:0 0 12px;">Key Decision Makers</h3>
+      ${(contacts || []).map((c: any) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;">
+          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#5b8af5,#3ecf8e);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;">${(c.name || "?").charAt(0)}</div>
+          <div>
+            <div style="font-size:13px;color:#f0f0f0;font-weight:500;">${c.name}</div>
+            <div style="font-size:11px;color:#666;">${c.title}${c.linkedinUrl ? ` · <a href="${c.linkedinUrl}" style="color:#5b8af5;text-decoration:none;">LinkedIn</a>` : ''}</div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  ` : "";
+
+  const onePagerUrl = salesKit.onePagerUrl ? `${req.protocol}://${req.get('host')}${salesKit.onePagerUrl}` : "";
+
+  const htmlBody = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0f0f0f;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<div style="max-width:600px;margin:0 auto;background:#0f0f0f;padding:0;">
+  <!-- Header -->
+  <div style="padding:24px 32px;border-bottom:1px solid #1e1e1e;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:24px;height:24px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:10px;font-weight:900;color:#0f0f0f;">B</span>
+      </div>
+      <span style="font-size:16px;font-weight:700;color:#f0f0f0;font-family:'DM Serif Display',serif;">Biks.ai</span>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div style="padding:40px 32px;text-align:center;background:linear-gradient(180deg,#111 0%,#0f0f0f 100%);">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#5b8af5;margin-bottom:12px;">PARTNERSHIP OPPORTUNITY</div>
+    <h1 style="font-size:24px;font-weight:700;color:#f0f0f0;margin:0 0 8px;line-height:1.3;">${business.companyName} × ${lead.name}</h1>
+    <p style="font-size:14px;color:#888;margin:0;">${lead.category || ''} ${lead.city ? '· ' + lead.city : ''}</p>
+  </div>
+
+  <!-- Outreach Message -->
+  <div style="padding:32px;">
+    <div style="background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:24px;">
+      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3ecf8e;margin:0 0 16px;">Message</h3>
+      <div style="font-size:14px;color:#ccc;line-height:1.8;white-space:pre-wrap;">${salesKit.outreachEmailBody}</div>
+    </div>
+  </div>
+
+  <!-- Why Relevant Now -->
+  <div style="padding:0 32px 24px;">
+    <div style="background:#0e1e16;border:1px solid #2a4a37;border-radius:10px;padding:20px;">
+      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3ecf8e;margin:0 0 10px;">Why Relevant Now</h3>
+      <p style="font-size:13px;color:#a0d4b8;line-height:1.6;margin:0;">${salesKit.whyRelevantNow}</p>
+    </div>
+  </div>
+
+  <!-- Synergies -->
+  <div style="padding:0 32px 24px;">
+    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#444;margin:0 0 12px;">Top Synergies</h3>
+    <table style="width:100%;border-collapse:collapse;background:#161616;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;">
+      <tr style="background:#1a1a1a;">
+        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#5b8af5;text-align:left;border-bottom:1px solid #2a2a2a;">Our Solution</th>
+        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#f5454a;text-align:left;border-bottom:1px solid #2a2a2a;">Your Need</th>
+        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#3ecf8e;text-align:left;border-bottom:1px solid #2a2a2a;">Evidence</th>
+      </tr>
+      ${synergiesHtml}
+    </table>
+  </div>
+
+  <!-- Contacts -->
+  ${contactsHtml}
+
+  <!-- CTA -->
+  <div style="padding:32px;text-align:center;">
+    <div style="background:linear-gradient(135deg,#5b8af5,#3ecf8e);border-radius:10px;padding:32px;">
+      <h3 style="font-size:18px;font-weight:700;color:#fff;margin:0 0 12px;">Let's Explore This Together</h3>
+      <p style="font-size:13px;color:rgba(255,255,255,0.8);margin:0 0 20px;">${salesKit.suggestedAngle}</p>
+      ${onePagerUrl ? `<a href="${onePagerUrl}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">View Full Proposal →</a>` : ''}
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:24px 32px;border-top:1px solid #1e1e1e;text-align:center;">
+    <p style="font-size:11px;color:#555;margin:0;">Sent via <span style="color:#f0f0f0;font-weight:600;">Biks.ai</span> — AI-powered sales intelligence</p>
+    <p style="font-size:10px;color:#333;margin:8px 0 0;">From ${business.companyName} • ${business.website || ''}</p>
+  </div>
+</div>
+</body>
+</html>`;
+
+  try {
+    const resendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM_EMAIL || "nura@biks.ai",
+        to,
+        subject,
+        html: htmlBody,
+      }),
+    });
+
+    if (!resendRes.ok) {
+      const errData: any = await resendRes.json();
+      return res.json({ ok: false, error: errData.message || "Send failed" });
+    }
+
+    const data: any = await resendRes.json();
+    return res.json({ ok: true, id: data.id });
+  } catch (e: any) {
+    return res.json({ ok: false, error: e.message });
+  }
+});
+
 export default api;

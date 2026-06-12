@@ -127,7 +127,7 @@ function App() {
           setLeads={setLeads}
           contacts={contacts}
           setContacts={setContacts}
-          onSelectLead={(lead) => { setSelectedLead(lead); setStep(4); }}
+          onSelectLead={(lead) => { setSelectedLead(lead); setContacts([]); setBrief(null); setSalesKit(null); setStep(4); }}
           onBack={() => setStep(2)}
           initialCategory={initialCategory}
         />
@@ -140,6 +140,7 @@ function App() {
           brief={brief}
           setBrief={setBrief}
           contacts={contacts}
+          setContacts={setContacts}
           salesKit={salesKit}
           setSalesKit={setSalesKit}
           onBack={() => setStep(3)}
