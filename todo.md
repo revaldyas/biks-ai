@@ -81,3 +81,9 @@
 - [x] Add "Marketing Kit" tab in Step 5 with HTML one-pager preview
 - [x] Add download button for the HTML one-pager
 - [x] Integrate seller design tokens (colors, fonts) into the generated kit
+
+## Send Kit Email from Marketing Kit Tab
+- [x] Add "Send Kit Email" button in Marketing Kit tab (after kit is generated)
+- [x] Email contains outreach email body + link to HTML one-pager
+- [x] Uses fixed recipient ngurah.linggih@gmail.com via Resend
+- [x] Success/failure state display after sending

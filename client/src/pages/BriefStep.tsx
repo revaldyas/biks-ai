@@ -23,6 +23,9 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   const [emailError, setEmailError] = useState("");
   const [kitLoading, setKitLoading] = useState(false);
   const [kitProgress, setKitProgress] = useState({ pct: 0, message: "", detail: "" });
+  const [kitEmailSending, setKitEmailSending] = useState(false);
+  const [kitEmailSent, setKitEmailSent] = useState(false);
+  const [kitEmailError, setKitEmailError] = useState("");
 
   useEffect(() => {
     if (!brief) generateBrief();
@@ -153,6 +156,35 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       setEmailError(e.message);
     }
     setEmailSending(false);
+  };
+
+  const sendKitEmail = async () => {
+    if (!salesKit) return;
+    setKitEmailSending(true);
+    setKitEmailError("");
+    try {
+      const onePagerLink = salesKit.onePagerUrl
+        ? `<br/><br/><hr style="border:none;border-top:1px solid #ddd;margin:24px 0;"/><p style="font-size:13px;color:#666;">📄 <strong>View the full Marketing One-Pager:</strong><br/><a href="${window.location.origin}${salesKit.onePagerUrl}" style="color:#5b8af5;">${window.location.origin}${salesKit.onePagerUrl}</a></p>`
+        : "";
+      const htmlBody = salesKit.outreachEmailBody.replace(/\n/g, "<br/>") + onePagerLink;
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: salesKit.outreachEmailSubject,
+          html: htmlBody,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setKitEmailSent(true);
+      } else {
+        setKitEmailError(data.error || "Failed to send");
+      }
+    } catch (e: any) {
+      setKitEmailError(e.message);
+    }
+    setKitEmailSending(false);
   };
 
   const tabs = [
@@ -553,6 +585,53 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
                           {salesKit.outreachEmailBody}
                         </div>
+                      </div>
+
+                      {/* Send Kit Email */}
+                      <div style={{
+                        background: "#161616", border: "1px solid #2a2a2a",
+                        borderRadius: 10, padding: "16px 20px", marginTop: 16,
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 10 }}>
+                          SEND KIT EMAIL + ONE-PAGER LINK
+                        </div>
+                        {kitEmailSent ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ color: "#3ecf8e", fontSize: 16 }}>✓</span>
+                            <span style={{ fontSize: 14, color: "#3ecf8e" }}>Kit email sent to {emailTo}!</span>
+                          </div>
+                        ) : (
+                          <div>
+                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                              <div style={{
+                                flex: 1, background: "#1c1c1c", border: "1px solid #2a2a2a",
+                                borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#f0f0f0",
+                                fontFamily: "'Inter', sans-serif",
+                              }}>
+                                To: {emailTo}
+                              </div>
+                              <button
+                                onClick={sendKitEmail}
+                                disabled={kitEmailSending}
+                                style={{
+                                  background: "linear-gradient(135deg, #5b8af5, #3ecf8e)", color: "#fff", border: "none",
+                                  borderRadius: 8, padding: "10px 20px", fontSize: 14, fontWeight: 600,
+                                  cursor: kitEmailSending ? "not-allowed" : "pointer",
+                                  opacity: kitEmailSending ? 0.5 : 1,
+                                  fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap",
+                                }}
+                              >
+                                {kitEmailSending ? "Sending..." : "Send Kit Email"}
+                              </button>
+                            </div>
+                            <p style={{ fontSize: 11, color: "#555", marginTop: 8 }}>
+                              Sends outreach email + link to the HTML marketing one-pager
+                            </p>
+                            {kitEmailError && (
+                              <p style={{ fontSize: 12, color: "#f5454a", marginTop: 8 }}>{kitEmailError}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </>
