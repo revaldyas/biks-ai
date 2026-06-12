@@ -70,3 +70,14 @@
 - [x] Configure Resend with fixed to: ngurah.linggih@gmail.com
 - [x] Update send-email endpoint to use fixed recipient
 - [x] Update frontend to show fixed recipient instead of input field
+
+## B2B Sales Kit Integration (from skill)
+- [x] POST /api/generate-sales-kit - SSE endpoint that runs full sales kit workflow
+- [x] Seller website deep analysis (extract products, positioning, design language, logo, colors, fonts)
+- [x] Prospect website deep analysis (extract pain points, synergies, logo)
+- [x] Generate HTML marketing one-pager (self-contained, seller-branded, both logos)
+- [x] Generate account brief with synergy table
+- [x] Generate personalized outreach email (under 180 words, specific, peer-to-peer)
+- [x] Add "Marketing Kit" tab in Step 5 with HTML one-pager preview
+- [x] Add download button for the HTML one-pager
+- [x] Integrate seller design tokens (colors, fonts) into the generated kit

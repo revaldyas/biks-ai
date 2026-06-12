@@ -110,4 +110,22 @@ describe("API route handlers", () => {
       close();
     }
   });
+
+  it("POST /api/generate-sales-kit requires business and lead", async () => {
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/generate-sales-kit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      // SSE response should contain error event about missing fields
+      expect(text).toContain("business and lead are required");
+    } finally {
+      close();
+    }
+  });
 });

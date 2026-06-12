@@ -61,6 +61,17 @@ export interface MeetingBrief {
   memoriesUsed: string[];
 }
 
+export interface SalesKit {
+  accountBrief: string;
+  whyRelevantNow: string;
+  synergies: { sellerProduct: string; prospectPain: string; evidence: string }[];
+  suggestedAngle: string;
+  outreachEmailSubject: string;
+  outreachEmailBody: string;
+  memoriesUsed: string[];
+  onePagerUrl: string;
+}
+
 function App() {
   const [step, setStep] = useState(1);
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
@@ -69,6 +80,7 @@ function App() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [brief, setBrief] = useState<MeetingBrief | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [salesKit, setSalesKit] = useState<SalesKit | null>(null);
 
   const handleReset = () => {
     setStep(1);
@@ -78,6 +90,7 @@ function App() {
     setSelectedLead(null);
     setBrief(null);
     setContacts([]);
+    setSalesKit(null);
   };
 
   return (
@@ -130,6 +143,8 @@ function App() {
           brief={brief}
           setBrief={setBrief}
           contacts={contacts}
+          salesKit={salesKit}
+          setSalesKit={setSalesKit}
           onBack={() => setStep(4)}
         />
       )}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact } from "../App";
+import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact, SalesKit } from "../App";
 
 interface Props {
   business: BusinessProfile;
@@ -8,17 +8,21 @@ interface Props {
   brief: MeetingBrief | null;
   setBrief: (b: MeetingBrief | null) => void;
   contacts: Contact[];
+  salesKit: SalesKit | null;
+  setSalesKit: (k: SalesKit | null) => void;
   onBack: () => void;
 }
 
-export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, onBack }: Props) {
-  const [tab, setTab] = useState<"account" | "email" | "meeting">("account");
+export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, salesKit, setSalesKit, onBack }: Props) {
+  const [tab, setTab] = useState<"account" | "email" | "meeting" | "kit">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
   const emailTo = "ngurah.linggih@gmail.com";
   const [emailSending, setEmailSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailError, setEmailError] = useState("");
+  const [kitLoading, setKitLoading] = useState(false);
+  const [kitProgress, setKitProgress] = useState({ pct: 0, message: "", detail: "" });
 
   useEffect(() => {
     if (!brief) generateBrief();
@@ -75,6 +79,57 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     setLoading(false);
   };
 
+  const generateSalesKit = async () => {
+    setKitLoading(true);
+    setKitProgress({ pct: 0, message: "Starting sales kit...", detail: "" });
+
+    try {
+      const res = await fetch("/api/generate-sales-kit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business,
+          lead: { name: lead.name, url: lead.url, summary: lead.summary, category: lead.category, city: lead.city },
+          memories: memories.map(m => m.text),
+        }),
+      });
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === "progress") {
+              setKitProgress({ pct: evt.pct, message: evt.message, detail: evt.detail || "" });
+            }
+            if (evt.type === "complete") {
+              setSalesKit(evt.result);
+              setKitLoading(false);
+              return;
+            }
+            if (evt.type === "error") {
+              setKitLoading(false);
+              return;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    setKitLoading(false);
+  };
+
   const sendEmail = async () => {
     if (!brief) return;
     setEmailSending(true);
@@ -104,6 +159,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
     { key: "account" as const, label: "Account Brief" },
     { key: "email" as const, label: "Outreach Email" },
     { key: "meeting" as const, label: "Meeting Prep" },
+    { key: "kit" as const, label: "Marketing Kit" },
   ];
 
   return (
@@ -346,6 +402,191 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {tab === "kit" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                {kitLoading ? (
+                  <div style={{ textAlign: "center", paddingTop: 60 }}>
+                    <div style={{
+                      display: "inline-block", width: 20, height: 20,
+                      border: "2px solid rgba(255,255,255,0.25)",
+                      borderTopColor: "#fff", borderRadius: "50%",
+                      animation: "spin 0.7s linear infinite",
+                      marginBottom: 16,
+                    }} />
+                    <p style={{ fontSize: 15, color: "#f0f0f0", marginBottom: 8 }}>{kitProgress.message}</p>
+                    <p style={{ fontSize: 12, color: "#555" }}>{kitProgress.detail}</p>
+                    <div style={{ maxWidth: 300, margin: "16px auto", height: 2, background: "#222", borderRadius: 2 }}>
+                      <div style={{
+                        height: "100%", background: "linear-gradient(90deg, #5b8af5, #3ecf8e)", borderRadius: 2,
+                        width: `${kitProgress.pct}%`, transition: "width 0.6s ease",
+                      }} />
+                    </div>
+                  </div>
+                ) : salesKit ? (
+                  <>
+                    {/* Account Brief */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                        ACCOUNT BRIEF
+                      </div>
+                      <div style={{
+                        background: "#1c1c1c", border: "1px solid #2a2a2a",
+                        borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc", lineHeight: 1.7,
+                      }}>
+                        {salesKit.accountBrief}
+                      </div>
+                    </div>
+
+                    {/* Sales Kit Results */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                        WHY RELEVANT NOW
+                      </div>
+                      <div style={{
+                        background: "#1c1c1c", border: "1px solid #2a2a2a",
+                        borderRadius: 8, padding: "16px 20px", fontSize: 14, color: "#ccc", lineHeight: 1.7,
+                      }}>
+                        {salesKit.whyRelevantNow}
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                        SUGGESTED BD ANGLE
+                      </div>
+                      <div style={{
+                        background: "#0e1e16", border: "1px solid #2a4a37",
+                        borderRadius: 8, padding: "12px 16px", fontSize: 14, color: "#3ecf8e", fontWeight: 500,
+                      }}>
+                        {salesKit.suggestedAngle}
+                      </div>
+                    </div>
+
+                    {/* Synergies Table */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 12 }}>
+                        TOP SYNERGIES
+                      </div>
+                      <div style={{ border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{
+                          display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                          background: "#161616", padding: "10px 14px",
+                          borderBottom: "1px solid #2a2a2a",
+                        }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#5b8af5" }}>Seller Product</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#f5454a" }}>Prospect Pain</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#3ecf8e" }}>Evidence</span>
+                        </div>
+                        {salesKit.synergies.map((s, i) => (
+                          <div key={i} style={{
+                            display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                            padding: "10px 14px", background: "#1c1c1c",
+                            borderBottom: i < salesKit.synergies.length - 1 ? "1px solid #222" : "none",
+                          }}>
+                            <span style={{ fontSize: 12, color: "#ccc" }}>{s.sellerProduct}</span>
+                            <span style={{ fontSize: 12, color: "#ccc" }}>{s.prospectPain}</span>
+                            <span style={{ fontSize: 12, color: "#888", fontStyle: "italic" }}>{s.evidence}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* HTML One-Pager Preview */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444" }}>
+                          HTML MARKETING ONE-PAGER
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <a
+                            href={salesKit.onePagerUrl}
+                            target="_blank"
+                            rel="noopener"
+                            style={{
+                              background: "#5b8af5", color: "#fff", border: "none",
+                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                              textDecoration: "none", display: "inline-block",
+                            }}
+                          >
+                            Open Full Page ↗
+                          </a>
+                          <a
+                            href={salesKit.onePagerUrl}
+                            download={`${business.companyName}-${lead.name}-kit.html`}
+                            style={{
+                              background: "#3ecf8e", color: "#0a0d14", border: "none",
+                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                              textDecoration: "none", display: "inline-block",
+                            }}
+                          >
+                            Download HTML
+                          </a>
+                        </div>
+                      </div>
+                      <div style={{
+                        border: "1px solid #2a2a2a", borderRadius: 8, overflow: "hidden",
+                        background: "#fff", height: 500,
+                      }}>
+                        <iframe
+                          src={salesKit.onePagerUrl}
+                          style={{ width: "100%", height: "100%", border: "none" }}
+                          title="Marketing One-Pager Preview"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Kit-generated Outreach Email */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#444", marginBottom: 8 }}>
+                        KIT OUTREACH EMAIL
+                      </div>
+                      <div style={{
+                        background: "#1c1c1c", border: "1px solid #2a2a2a",
+                        borderRadius: 8, padding: "16px 20px", marginBottom: 12,
+                      }}>
+                        <div style={{ fontSize: 12, color: "#5b8af5", fontWeight: 600, marginBottom: 8 }}>
+                          Subject: {salesKit.outreachEmailSubject}
+                        </div>
+                        <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                          {salesKit.outreachEmailBody}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ textAlign: "center", paddingTop: 60 }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{
+                        width: 56, height: 56, margin: "0 auto 16px",
+                        background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
+                        borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 24,
+                      }}>
+                        📄
+                      </div>
+                      <h3 style={{ fontSize: 18, fontWeight: 600, color: "#f0f0f0", marginBottom: 8 }}>
+                        Generate Marketing Kit
+                      </h3>
+                      <p style={{ fontSize: 14, color: "#666", maxWidth: 400, margin: "0 auto 24px", lineHeight: 1.6 }}>
+                        Create a branded HTML one-pager with synergy analysis, proof points, and a personalized pitch — styled to match {business.companyName}'s brand.
+                      </p>
+                    </div>
+                    <button
+                      onClick={generateSalesKit}
+                      style={{
+                        background: "linear-gradient(135deg, #5b8af5, #3ecf8e)",
+                        color: "#fff", border: "none",
+                        borderRadius: 8, padding: "12px 28px", fontSize: 15, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'Inter', sans-serif",
+                      }}
+                    >
+                      Generate Sales Kit
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </>
