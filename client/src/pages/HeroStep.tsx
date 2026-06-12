@@ -111,7 +111,7 @@ export default function HeroStep({ onComplete }: Props) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleAnalyze(); }}
-            placeholder="https://www.yourcompany.com"
+            placeholder="https://www.moncolpool.co.id/"
             disabled={loading}
             style={{
               width: "100%",
