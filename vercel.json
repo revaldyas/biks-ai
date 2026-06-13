@@ -1,12 +1,12 @@
 {
-  "buildCommand": "vite build",
+  "buildCommand": "vite build && esbuild api/index.ts --platform=node --target=node20 --bundle --format=esm --packages=external --outfile=api/handler.js",
   "outputDirectory": "dist/public",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/api/:path*", "destination": "/api/handler" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/index.ts": {
+    "api/handler.js": {
       "maxDuration": 30
     }
   }
