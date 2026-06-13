@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { ENV } from "./_core/env";
 import { manusTask } from "./_core/manus";
+import { createReviewOpportunityTask, getReviewOpportunityTaskStatus } from "./reviewOpportunities";
 
 const api = Router();
 
@@ -18,6 +19,49 @@ function sseHeaders(res: Response) {
 function sseSend(res: Response, data: object) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
+
+// ============================================================
+// POST /api/review-opportunities — Review-based opportunity discovery
+// ============================================================
+api.post("/api/review-opportunities", async (req: Request, res: Response) => {
+  const { country, businessTypes, memories } = req.body ?? {};
+
+  if (!country || !Array.isArray(businessTypes) || businessTypes.length === 0) {
+    return res.status(400).json({ error: "country and businessTypes are required" });
+  }
+
+  try {
+    const result = await createReviewOpportunityTask({
+      country,
+      businessTypes,
+      memories: Array.isArray(memories) ? memories : [],
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Review opportunity discovery failed" });
+  }
+});
+
+// ============================================================
+// GET /api/review-opportunities/status — Review-based opportunity task polling
+// ============================================================
+api.get("/api/review-opportunities/status", async (req: Request, res: Response) => {
+  const taskId = String(req.query.taskId || "");
+
+  if (!taskId) {
+    return res.status(400).json({ error: "taskId is required" });
+  }
+
+  try {
+    const result = await getReviewOpportunityTaskStatus(taskId);
+    return res.json(result);
+  } catch (error: any) {
+    if (error?.message === "taskId not found") {
+      return res.status(404).json({ error: "taskId not found" });
+    }
+    return res.status(500).json({ error: error?.message || "Review opportunity status check failed" });
+  }
+});
 
 // ============================================================
 // POST /api/analyze-website — SSE streaming website analysis
