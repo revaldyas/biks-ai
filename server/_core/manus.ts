@@ -111,16 +111,18 @@ export async function manusTask<T>(
 
     onProgress?.("Agent finished", "Extracting structured output", 88);
 
+    // Priority 1: standalone structured_output_result message (actual Manus API format)
+    const structuredMsg = msgs.find(m => m.type === "structured_output_result");
+    if (structuredMsg?.structured_output_result?.success && structuredMsg.structured_output_result.value != null) {
+      return structuredMsg.structured_output_result.value as T;
+    }
+
+    // Priority 2: structured output nested inside assistant_message (fallback)
     const assistantMsg = msgs.find(m => m.type === "assistant_message");
-    const structured = assistantMsg?.assistant_message?.structured_output_result;
-
-    // Priority 1: structured output (most reliable)
-    if (structured?.success && structured.value != null) return structured.value as T;
-
-    // Priority 2: structured output value even if success=false
-    if (structured?.value != null) {
+    const nested = assistantMsg?.assistant_message?.structured_output_result;
+    if (nested?.value != null) {
       try {
-        const v = typeof structured.value === "string" ? JSON.parse(structured.value) : structured.value;
+        const v = typeof nested.value === "string" ? JSON.parse(nested.value) : nested.value;
         return v as T;
       } catch {}
     }
@@ -132,8 +134,6 @@ export async function manusTask<T>(
       if (extracted != null) return extracted as T;
     }
 
-    // Log raw messages for debugging
-    console.error("[Manus] Could not extract output. Raw messages:", JSON.stringify(msgs.slice(0, 3), null, 2));
     throw new Error("Manus: agent stopped but returned no parseable output");
   }
 
