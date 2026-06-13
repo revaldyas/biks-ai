@@ -611,7 +611,7 @@ Return ONLY valid JSON (no markdown) with this structure:
 // ============================================================
 api.post("/api/generate-sales-kit", async (req: Request, res: Response) => {
   sseHeaders(res);
-  const { business, lead, memories } = req.body;
+  const { business, lead, memories, reviewPainPoints } = req.body;
 
   if (!business || !lead) {
     sseSend(res, { type: "error", message: "business and lead are required" });
@@ -667,7 +667,12 @@ Prospect Website Content: ${prospectContent.slice(0, 2000)}
 
 Business Memories & Preferences:
 ${memoryText}
+${Array.isArray(reviewPainPoints) && reviewPainPoints.length > 0 ? `
+CUSTOMER REVIEW PAIN POINTS (from real online reviews of the prospect):
+${reviewPainPoints.map((pp: any, i: number) => `${i + 1}. [${pp.severity?.toUpperCase() || "MEDIUM"}] ${pp.issue} — Evidence: "${pp.evidence}"`).join("\n")}
 
+IMPORTANT: Use these verified pain points from actual customer reviews to make the outreach email and synergies more specific and credible. Reference specific complaints or issues in the email body.
+` : ""}
 Generate a complete B2B sales kit with:
 1. Account Brief - what the prospect does, why commercially relevant now, top synergies
 2. Outreach Email - under 180 words, specific opening referencing prospect's website, connect ONE seller capability to ONE prospect pain, low-friction CTA, peer-to-peer tone
@@ -833,7 +838,7 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
 // ============================================================
 // Shared HTML email builder
 // ============================================================
-function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: any[]) {
+function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: any[], painPoints?: any[]) {
   const synergiesHtml = (salesKit.synergies || []).map((s: any) => `
     <tr>
       <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.sellerProduct}</td>
@@ -895,6 +900,21 @@ function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: an
     </div>
   </div>
 
+  <!-- Pain Points from Reviews -->
+  ${Array.isArray(painPoints) && painPoints.length > 0 ? `
+  <div style="padding:0 32px 24px;">
+    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#f5454a;margin:0 0 12px;">Customer Pain Points We Can Solve</h3>
+    <div style="background:#1a1515;border:1px solid #3a2020;border-radius:8px;padding:16px;">
+      ${painPoints.slice(0, 3).map((pp: any) => `
+        <div style="padding:8px 0;border-bottom:1px solid #2a2020;">
+          <div style="font-size:13px;color:#f0f0f0;font-weight:500;margin-bottom:4px;">${pp.issue}</div>
+          <div style="font-size:11px;color:#888;font-style:italic;">&ldquo;${pp.evidence}&rdquo;</div>
+        </div>
+      `).join("")}
+    </div>
+  </div>
+  ` : ""}
+
   <!-- Synergies -->
   <div style="padding:0 32px 24px;">
     <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#444;margin:0 0 12px;">Top Synergies</h3>
@@ -934,11 +954,11 @@ function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: an
 // POST /api/preview-kit-email — Return the exact HTML that would be sent
 // ============================================================
 api.post("/api/preview-kit-email", async (req: Request, res: Response) => {
-  const { business, lead, salesKit, contacts } = req.body;
+  const { business, lead, salesKit, contacts, painPoints } = req.body;
   if (!business || !lead || !salesKit) {
     return res.status(400).json({ error: "business, lead, and salesKit are required" });
   }
-  const html = buildKitEmailHtml(business, lead, salesKit, contacts || []);
+  const html = buildKitEmailHtml(business, lead, salesKit, contacts || [], painPoints || []);
   return res.json({ html });
 });
 
@@ -951,15 +971,15 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
     return res.status(500).json({ ok: false, error: "Resend not configured" });
   }
 
-  const { business, lead, salesKit, contacts } = req.body;
+  const { business, lead, salesKit, contacts, painPoints } = req.body;
   if (!business || !lead || !salesKit) {
     return res.status(400).json({ ok: false, error: "business, lead, and salesKit are required" });
   }
 
   const to = "ngurah.linggih@gmail.com";
-  const subject = salesKit.outreachEmailSubject || `${business.companyName} \u00d7 ${lead.name} — Partnership Opportunity`;
+  const subject = salesKit.outreachEmailSubject || `${business.companyName} \u00d7 ${lead.name} \u2014 Partnership Opportunity`;
 
-  const htmlBody = buildKitEmailHtml(business, lead, salesKit, contacts || []);
+  const htmlBody = buildKitEmailHtml(business, lead, salesKit, contacts || [], painPoints || []);
 
   try {
     const resendRes = await fetch("https://api.resend.com/emails", {

@@ -48,7 +48,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       const res = await fetch("/api/preview-kit-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business, lead, salesKit, contacts }),
+        body: JSON.stringify({ business, lead, salesKit, contacts, painPoints: reviewAnalysis?.painPoints || [] }),
       });
       const data = await res.json();
       setEmailPreviewHtml(data.html || "");
@@ -173,6 +173,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
           business,
           lead: { name: lead.name, url: lead.url, summary: lead.summary, category: lead.category, city: lead.city },
           memories: memories.map(m => m.text),
+          reviewPainPoints: reviewAnalysis?.painPoints || [],
         }),
       });
 
@@ -250,6 +251,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
           lead,
           salesKit,
           contacts,
+          painPoints: reviewAnalysis?.painPoints || [],
         }),
       });
       const data = await res.json();
