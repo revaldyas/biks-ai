@@ -1,4 +1,5 @@
 import React from "react";
+import { useIsMobile } from "../hooks/useMobile";
 
 interface NavbarProps {
   currentStep: number;
@@ -7,6 +8,9 @@ interface NavbarProps {
   onStepClick: (step: number) => void;
   onReset: () => void;
   website: string;
+  onSignOut?: () => void;
+  trialDaysLeft?: number | null;
+  onOpenHistory?: () => void;
 }
 
 const steps = [
@@ -15,7 +19,8 @@ const steps = [
   { num: 4, label: "Marketing Kit" },
 ];
 
-export default function Navbar({ currentStep, maxStepReached, canNavigateToStep, onStepClick, onReset, website }: NavbarProps) {
+export default function Navbar({ currentStep, maxStepReached, canNavigateToStep, onStepClick, onReset, website, onSignOut, trialDaysLeft, onOpenHistory }: NavbarProps) {
+  const isMobile = useIsMobile();
   const domain = website ? website.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
 
   return (
@@ -23,25 +28,19 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
       display: "grid",
       gridTemplateColumns: "1fr auto 1fr",
       alignItems: "center",
-      padding: "18px 32px",
+      padding: isMobile ? "12px 14px" : "18px 32px",
       borderBottom: "1px solid var(--line)",
       background: "var(--bg)",
     }}>
       {/* Logo */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, width: 18, height: 18 }}>
-          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
-          <span style={{ background: "var(--ink)", borderRadius: 1, display: "block" }} />
-        </div>
-        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
-          Biks.ai
+        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 17, color: "var(--ink)", letterSpacing: "-0.01em" }}>
+          Biks<span style={{ color: "var(--sage-strong)" }}>.ai</span>
         </span>
       </div>
 
       {/* Step indicators */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8 }}>
         {steps.map((s, i) => {
           const isDone = currentStep > s.num;
           const isActive = currentStep === s.num;
@@ -79,39 +78,57 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
                 }}>
                   {isDone ? "✓" : s.num - 1}
                 </span>
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: isActive ? 500 : 400,
-                  color: isActive ? "var(--ink)" : isDone ? "var(--ink-3)" : "var(--ink-3)",
-                }}>
-                  {s.label}
-                </span>
+                {!isMobile && (
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: isActive ? 500 : 400,
+                    color: isActive ? "var(--ink)" : isDone ? "var(--ink-3)" : "var(--ink-3)",
+                  }}>
+                    {s.label}
+                  </span>
+                )}
               </div>
             </React.Fragment>
           );
         })}
       </div>
 
-      {/* Right: domain + reset */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12 }}>
-        {domain && (
+      {/* Right: trial + domain + reset + sign out */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: isMobile ? 8 : 12 }}>
+        {typeof trialDaysLeft === "number" && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.06em",
+            color: "var(--gold-text)", background: "var(--surface)", border: "1px solid var(--line)",
+            borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap",
+          }}>
+            {trialDaysLeft}d left
+          </span>
+        )}
+        {!isMobile && domain && (
           <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{domain}</span>
+        )}
+        {onOpenHistory && (
+          <button
+            onClick={onOpenHistory}
+            style={{ background: "none", border: "none", padding: "6px 0", fontSize: 13, fontWeight: 500, color: "var(--ink-3)", cursor: "pointer", fontFamily: "var(--font-sans)" }}
+          >
+            History
+          </button>
         )}
         <button
           onClick={onReset}
-          style={{
-            background: "none",
-            border: "none",
-            padding: "6px 0",
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--ink-3)",
-            cursor: "pointer",
-            fontFamily: "var(--font-sans)",
-          }}
+          style={{ background: "none", border: "none", padding: "6px 0", fontSize: 13, fontWeight: 500, color: "var(--ink-3)", cursor: "pointer", fontFamily: "var(--font-sans)" }}
         >
           Reset
         </button>
+        {onSignOut && (
+          <button
+            onClick={onSignOut}
+            style={{ background: "none", border: "none", padding: "6px 0", fontSize: 13, fontWeight: 500, color: "var(--ink-3)", cursor: "pointer", fontFamily: "var(--font-sans)" }}
+          >
+            Sign out
+          </button>
+        )}
       </div>
     </nav>
   );

@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import type { BusinessProfile, MemoryItem } from "../App";
+import { useIsMobile } from "../hooks/useMobile";
+import Tooltip from "../components/Tooltip";
 
 interface Props {
   business: BusinessProfile;
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export default function DashboardStep({ business, memories, setMemories, onSelectCategory }: Props) {
+  const isMobile = useIsMobile();
   const [memoryInput, setMemoryInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
@@ -63,13 +66,13 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
   return (
     <div style={{ minHeight: "calc(100vh - 57px)", display: "flex", flexDirection: "column", animation: "fadeIn 0.3s ease" }}>
       {/* Main content */}
-      <div style={{ flex: 1, padding: "28px 32px 120px", overflowY: "auto" }}>
+      <div style={{ flex: 1, padding: isMobile ? "16px 14px 220px" : "28px 32px 120px", overflowY: "auto" }}>
         {/* 4-panel grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 14 : 16 }}>
           {/* Company Summary */}
           <div style={{
             background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
-            padding: "28px 28px 32px", minHeight: 220,
+            padding: isMobile ? "20px 18px 22px" : "28px 28px 32px", minHeight: isMobile ? "auto" : 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -77,6 +80,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 <path d="M7 7h10M7 12h10M7 17h6" />
               </svg>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Company Summary</h3>
+              <Tooltip text="What this company does, who it serves, and why it's commercially relevant — read only from its website." />
             </div>
             <p style={{ fontSize: 14, color: "var(--ink-3)", lineHeight: 1.7, margin: 0 }}>{business.summary}</p>
           </div>
@@ -84,7 +88,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
           {/* Core Value Proposition */}
           <div style={{
             background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
-            padding: "28px 28px 32px", minHeight: 220,
+            padding: isMobile ? "20px 18px 22px" : "28px 28px 32px", minHeight: isMobile ? "auto" : 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -93,6 +97,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 <path d="M2 12l10 5 10-5" />
               </svg>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Core Value Proposition</h3>
+              <Tooltip text="The strongest reasons customers buy from this company." />
             </div>
             {business.valuePropositions && business.valuePropositions.length > 0 ? (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -120,7 +125,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
           {/* Current Customer Segments */}
           <div style={{
             background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
-            padding: "28px 28px 32px", minHeight: 220,
+            padding: isMobile ? "20px 18px 22px" : "28px 28px 32px", minHeight: isMobile ? "auto" : 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -130,6 +135,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>Current Customer Segments</h3>
+              <Tooltip text="Buyer groups this company already serves, with any client names found on its site." />
             </div>
             {business.customerSegments && business.customerSegments.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -162,13 +168,14 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
           {/* New Business Opportunities */}
           <div style={{
             background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)",
-            padding: "28px 28px 32px", minHeight: 220,
+            padding: isMobile ? "20px 18px 22px" : "28px 28px 32px", minHeight: isMobile ? "auto" : 220,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
               </svg>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", margin: 0 }}>New Business Opportunities</h3>
+              <Tooltip text="Adjacent markets this company could expand into. Pick one on the Leads page to find prospects." />
             </div>
             <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 16, marginLeft: 30 }}>
               Review possible markets, then generate leads.
@@ -249,8 +256,11 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
       <div style={{
         position: "fixed", bottom: 0, left: 0, right: 0,
         background: "var(--surface)", borderTop: "1px solid var(--line)",
-        padding: "16px 32px",
-        display: "flex", alignItems: "center", gap: 16,
+        padding: isMobile ? "12px 14px" : "16px 32px",
+        display: "flex",
+        flexDirection: isMobile ? "column" : "row",
+        alignItems: isMobile ? "stretch" : "center",
+        gap: isMobile ? 10 : 16,
         zIndex: 100,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -264,12 +274,17 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
             </svg>
           </div>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>Add Business Context</div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Tell Biks what to remember about your company for lead search and sales material.</div>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>Add Business Context</span>
+              <Tooltip text="Tell Biks preferences (e.g. ideal customers to target or avoid). It uses these to sharpen lead search and outreach." />
+            </div>
+            {!isMobile && (
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Tell Biks what to remember about your company for lead search and sales material.</div>
+            )}
           </div>
         </div>
 
-        <div style={{ flex: 1, display: "flex", gap: 10 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10 }}>
           <input
             value={memoryInput}
             onChange={(e) => setMemoryInput(e.target.value)}
@@ -279,7 +294,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
               flex: 1,
               background: "var(--surface-2)", border: "1px solid var(--line)",
               borderRadius: "var(--radius-md)", padding: "11px 14px",
-              fontSize: 13, color: "var(--ink)", outline: "none",
+              fontSize: isMobile ? 16 : 13, color: "var(--ink)", outline: "none",
               fontFamily: "var(--font-sans)",
             }}
           />
@@ -294,6 +309,9 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
               opacity: saving || !memoryInput.trim() ? 0.5 : 1,
               fontFamily: "var(--font-sans)",
               whiteSpace: "nowrap",
+              flexShrink: 0,
+              minHeight: isMobile ? 44 : undefined,
+              width: isMobile ? "100%" : undefined,
             }}
           >
             {saving ? "Saving..." : "Save to Memory"}

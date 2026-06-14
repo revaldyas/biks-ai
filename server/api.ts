@@ -31,7 +31,6 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
 
   try {
     // Fetch website content (fast, done server-side before creating task)
-    let html = "";
     const fetchWithTimeout = async (targetUrl: string, timeoutMs: number) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -51,52 +50,98 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
       }
     };
 
-    try {
-      html = await fetchWithTimeout(url, 20000);
-    } catch {
-      try {
-        html = await fetchWithTimeout(url, 30000);
-      } catch (e2: any) {
-        return res.status(502).json({ error: `Failed to fetch website: ${e2.message}` });
-      }
-    }
-
-    const content = html
+    const stripHtml = (h: string) => h
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 4000);
+      .trim();
 
-    const prompt = `You are analyzing a business website for a B2B sales development tool.
-All website content is already provided below — do NOT browse the web or visit any URLs.
+    // Don't analyze a hosting/placeholder shell as if it were the company.
+    const looksLikePlaceholder = (text: string) => {
+      const lower = text.toLowerCase();
+      return (
+        lower.includes("replit app") ||
+        lower.includes("needs to be published") ||
+        lower.includes("this site is under construction") ||
+        lower.includes("default web page") ||
+        lower.includes("vite + react") ||
+        lower.length < 300
+      );
+    };
+
+    // Try the submitted URL, then ±www and ±trailing slash, until one returns real content.
+    const buildVariants = (raw: string): string[] => {
+      const withProto = raw.startsWith("http") ? raw : `https://${raw}`;
+      const variants = new Set<string>();
+      try {
+        const u = new URL(withProto);
+        const altHost = u.hostname.startsWith("www.") ? u.hostname.slice(4) : `www.${u.hostname}`;
+        for (const h of [u.hostname, altHost]) {
+          const base = `${u.protocol}//${h}${u.pathname.replace(/\/$/, "")}`;
+          variants.add(base); variants.add(base + "/");
+        }
+      } catch { variants.add(withProto); }
+      return Array.from(variants);
+    };
+
+    let content = "";
+    const variants = buildVariants(url);
+    for (let i = 0; i < variants.length; i++) {
+      try {
+        const html = await fetchWithTimeout(variants[i], i === 0 ? 20000 : 15000);
+        const text = stripHtml(html);
+        if (!looksLikePlaceholder(text)) { content = text.slice(0, 8000); console.log(`[analyze-website] using "${variants[i]}" (len=${text.length})`); break; }
+        if (text.length > content.length) content = text.slice(0, 8000); // best-effort fallback
+      } catch (e: any) {
+        console.log(`[analyze-website] variant "${variants[i]}" failed: ${e.message}`);
+      }
+    }
+    if (!content) {
+      return res.status(502).json({ error: "Failed to fetch website content. The site may be slow, offline, or blocking automated requests." });
+    }
+
+    const prompt = `You are a sharp B2B sales analyst producing CONCISE, website-ready analysis copy for a card-based UI. All website content is already provided below — do NOT browse the web or visit any URLs.
 
 URL: ${url}
 Website content (extracted text, already fetched):
 ${content}
 
-Based ONLY on the content above, return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
+GROUNDING RULES (critical):
+- Use ONLY the content above. Do NOT invent clients, locations, certifications, statistics, awards, technologies, or years of experience.
+- Include exact metrics ONLY when clearly visible; if a number is unreadable/uncertain, phrase it qualitatively.
+- Include location/operating market only if it appears in the content; otherwise omit rather than guess.
+- Separate KNOWN current customers from INFERRED new opportunities.
+- Put visible client names directly in customer segments; use an empty clientNames array when none are shown — never invent names.
+- This is real company content — do NOT say it is a placeholder/Replit/Vite/not-published page.
+- Avoid generic AI filler ("innovative solutions", "cutting-edge", "tailored to meet customer needs", "comprehensive suite", "driving digital transformation"). Use concrete nouns.
+- Labels must NOT use the "&" symbol, slashes, or parentheses; use "and" only for a natural industry category.
+
+Return ONLY valid JSON (no markdown) with this structure:
 {
   "companyName": "Company name",
   "website": "${url}",
-  "summary": "2-3 sentence company description",
-  "valueProposition": "What makes them uniquely valuable in 1-2 sentences",
-  "currentSegments": ["Existing customer segment 1", "Segment 2"],
+  "summary": "ONE paragraph, 55-85 words: company name, location/market if known, core products/services, main customer types, and the commercial pain points it solves.",
+  "valueProposition": "Fallback plain-text value proposition (1-2 sentences).",
+  "valuePropositions": [
+    { "valueLabel": "2-5 word Title Case label", "valueCopy": "18-35 words: specific capability AND business outcome.", "websiteCopy": "• Label: copy" }
+  ],
+  "currentSegments": ["Segment Label 1", "Segment Label 2"],
+  "customerSegments": [
+    { "segmentLabel": "Clean 2-5 word label, no '&'", "segmentDescription": "16-32 words on why this segment buys", "clientNames": ["Visible client A"], "websiteCopy": "Label — Client A" }
+  ],
   "products": ["Product/service 1", "Product 2"],
   "proofPoints": ["Credibility indicator 1", "Indicator 2"],
   "expansionCategories": [
-    {
-      "name": "New Market Category Name",
-      "whyRelevant": "Why this category needs their specific products",
-      "salesAngle": "One-sentence pitch angle",
-      "painPoints": ["Pain point 1", "Pain point 2"],
-      "searchQueries": ["search query to find leads in this category and city"]
-    }
+    { "name": "Clean 2-5 word market label, no '&'", "whyRelevant": "20-36 words: why this adjacent segment fits and its specific pain.", "salesAngle": "One-sentence pitch angle", "painPoints": ["Pain 1", "Pain 2"], "searchQueries": ["account-search query for this segment and the company's city"] }
   ]
 }
 
-Generate 4-5 expansion categories. Focus on premium B2B segments.`;
+REQUIREMENTS:
+- valuePropositions: EXACTLY 3 (the strongest, source-supported).
+- customerSegments: 3-5. clientNames empty if none shown — never invent.
+- expansionCategories: EXACTLY 3 clean adjacent markets, findable via account search.
+- currentSegments = the customerSegments labels (kept for backward compatibility).`;
 
     const taskId = await startManusTask(prompt, {
       type: "object",
@@ -105,7 +150,25 @@ Generate 4-5 expansion categories. Focus on premium B2B segments.`;
         website: { type: "string" },
         summary: { type: "string" },
         valueProposition: { type: "string" },
+        valuePropositions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { valueLabel: { type: "string" }, valueCopy: { type: "string" }, websiteCopy: { type: "string" } },
+            required: ["valueLabel", "valueCopy", "websiteCopy"],
+            additionalProperties: false,
+          },
+        },
         currentSegments: { type: "array", items: { type: "string" } },
+        customerSegments: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { segmentLabel: { type: "string" }, segmentDescription: { type: "string" }, clientNames: { type: "array", items: { type: "string" } }, websiteCopy: { type: "string" } },
+            required: ["segmentLabel", "segmentDescription", "clientNames", "websiteCopy"],
+            additionalProperties: false,
+          },
+        },
         products: { type: "array", items: { type: "string" } },
         proofPoints: { type: "array", items: { type: "string" } },
         expansionCategories: {
@@ -124,7 +187,7 @@ Generate 4-5 expansion categories. Focus on premium B2B segments.`;
           },
         },
       },
-      required: ["companyName", "website", "summary", "valueProposition", "currentSegments", "products", "proofPoints", "expansionCategories"],
+      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "expansionCategories"],
       additionalProperties: false,
     });
 
@@ -289,7 +352,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     "singapore": { country: "Singapore", domains: [".sg", ".com.sg"], strictTerms: ["singapore"] },
     "jakarta": { country: "Indonesia", domains: [".id", ".co.id"], strictTerms: ["jakarta", "jkt"] },
     "bali": { country: "Indonesia", domains: [".id", ".co.id"], strictTerms: ["bali", "denpasar", "seminyak", "ubud", "canggu", "kuta", "sanur", "nusa dua"] },
-    "kuala lumpur": { country: "Malaysia", domains: [".my", ".com.my"], strictTerms: ["kuala lumpur", "kl ", "petaling jaya", "bangsar", "mont kiara"] },
+    "kuala lumpur": { country: "Malaysia", domains: [".my", ".com.my"], strictTerms: ["kuala lumpur", "petaling jaya", "bangsar", "mont kiara", "cheras", "ampang", "bukit bintang"] },
     "bangkok": { country: "Thailand", domains: [".th", ".co.th"], strictTerms: ["bangkok", "bkk", "sukhumvit", "silom", "sathorn"] },
     "ho chi minh city": { country: "Vietnam", domains: [".vn", ".com.vn"], strictTerms: ["ho chi minh", "hcmc", "saigon", "district 1", "district 2", "district 7"] },
     "manila": { country: "Philippines", domains: [".ph", ".com.ph"], strictTerms: ["manila", "makati", "bgc", "taguig", "quezon city", "pasig"] },
@@ -356,6 +419,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     }
 
     // Process results
+    const hostOf = (u: string) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ""; } };
     const allResults = merged.map((r: any) => {
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
@@ -368,23 +432,103 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         email: emailMatch ? emailMatch[0] : null,
         linkedinUrl: linkedinMatch ? linkedinMatch[0] : null,
         _fullText: allText,
+        // Real cached page text only — EXCLUDES Exa's query-conditioned summary,
+        // which echoes the searched city into every result and breaks location checks.
+        _pageText: [r.text || "", ...(r.highlights || [])].join(" "),
         _url: (r.url || "").toLowerCase(),
+        _host: hostOf(r.url || ""),
       };
     });
 
-    // STRICT post-filter: company MUST mention the city explicitly in text, title, or URL
-    // Domain-only match is NOT sufficient (e.g. .co.id could be any Indonesian city)
+    // ccTLD -> country, for a country cross-check on the result's domain.
+    const tldCountry: Record<string, string> = {
+      ".sg": "Singapore", ".id": "Indonesia", ".my": "Malaysia", ".th": "Thailand",
+      ".vn": "Vietnam", ".ph": "Philippines", ".hk": "Hong Kong", ".jp": "Japan",
+      ".au": "Australia", ".ae": "UAE", ".uk": "United Kingdom",
+    };
+    const hostCountry = (host: string): string | null => {
+      for (const [tld, country] of Object.entries(tldCountry)) if (host.endsWith(tld)) return country;
+      return null;
+    };
+    const addressIndicators = /(jalan|jl\.?|street|\bst\b|road|\brd\b|avenue|\bave\b|boulevard|blvd|floor|level|tower|building|district|suburb|postal|postcode|zip|\b\d{4,6}\b)/i;
+
+    // STRICT post-filter: the city term must appear in a LOCATION-BEARING field
+    // (title, URL host, or a detected address line) — never just anywhere in the
+    // text blob (that was the leak). Plus a country cross-check on the domain.
+    // Unambiguous city/region names per city (NO district words like "marina"/"central"
+    // which collide across cities). Used to drop results that clearly name a DIFFERENT city.
+    const cityNames: Record<string, string[]> = {
+      "singapore": ["singapore"],
+      "jakarta": ["jakarta"],
+      "bali": ["bali", "denpasar", "seminyak", "ubud", "canggu", "kuta", "sanur"],
+      "kuala lumpur": ["kuala lumpur", "petaling jaya"],
+      "bangkok": ["bangkok"],
+      "ho chi minh city": ["ho chi minh", "saigon"],
+      "manila": ["manila", "makati"],
+      "hong kong": ["hong kong", "hongkong"],
+      "tokyo": ["tokyo"],
+      "sydney": ["sydney"],
+      "dubai": ["dubai"],
+      "london": ["london"],
+      "new york": ["new york", "nyc"],
+    };
+    const reqKey = (city || "").toLowerCase();
+    const ownNames = cityNames[reqKey] || [];
+    const conflictNames = Object.entries(cityNames)
+      .filter(([k]) => k !== reqKey)
+      .flatMap(([, v]) => v)
+      .filter(n => !ownNames.includes(n));
+
     let results = allResults;
+    let drops = 0;
     if (city) {
+      console.log(`[exa-search] city="${city}" country="${meta.country}" raw merged=${allResults.length}`);
       results = allResults.filter((r: any) => {
-        const searchText = (r._fullText + " " + r._url + " " + r.title).toLowerCase();
-        // MUST match at least one strict city term in content/title/URL
-        return meta.strictTerms.some(term => searchText.includes(term));
+        const title = (r.title || "").toLowerCase();
+        const host = r._host || "";
+        const fullText = (r._fullText || "").toLowerCase();
+
+        const hc = hostCountry(host);
+        if (hc && meta.country && hc !== meta.country) {
+          console.log(`[exa-search] DROP "${r.title}" (${host}) reason: country mismatch (domain=${hc}, want=${meta.country})`);
+          drops++; return false;
+        }
+
+        // If the title or host clearly names a DIFFERENT city, it's located there — drop.
+        const otherCity = conflictNames.find(n => title.includes(n) || host.includes(n.replace(/\s+/g, "")));
+        if (otherCity) {
+          console.log(`[exa-search] DROP "${r.title}" (${host}) reason: names other city "${otherCity}"`);
+          drops++; return false;
+        }
+
+        const inTitleOrHost = meta.strictTerms.some(term => title.includes(term) || host.includes(term.replace(/\s+/g, "")));
+        let inAddressLine = false;
+        if (!inTitleOrHost) {
+          // Scan the REAL page text (not the query-poisoned summary). Require the city
+          // term itself next to an address marker — a mere country mention is too weak.
+          const pageText = (r._pageText || "").toLowerCase();
+          for (const term of meta.strictTerms) {
+            let idx = pageText.indexOf(term);
+            while (idx !== -1) {
+              const window = pageText.slice(Math.max(0, idx - 60), idx + term.length + 60);
+              if (addressIndicators.test(window)) { inAddressLine = true; break; }
+              idx = pageText.indexOf(term, idx + term.length);
+            }
+            if (inAddressLine) break;
+          }
+        }
+
+        if (!inTitleOrHost && !inAddressLine) {
+          console.log(`[exa-search] DROP "${r.title}" (${host}) reason: city not in title/host/address line`);
+          drops++; return false;
+        }
+        return true;
       });
+      console.log(`[exa-search] post-filter kept=${results.length} dropped=${drops}`);
     }
 
     // Remove internal fields before returning
-    results = results.slice(0, numResults).map(({ _fullText, _url, ...rest }: any) => rest);
+    results = results.slice(0, numResults).map(({ _fullText, _pageText, _url, _host, ...rest }: any) => rest);
 
     if (results.length === 0 && city) {
       return res.json({ results: [], message: `No companies found specifically in ${city}. Try a different category or city.` });
@@ -405,10 +549,54 @@ api.post("/api/find-contacts", async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Exa not configured" });
   }
 
-  const { leadName, city } = req.body;
+  const { leadName, city, leadUrl } = req.body;
   if (!leadName) {
     return res.status(400).json({ error: "leadName is required" });
   }
+
+  // --- Company verification helpers (avoid returning execs from other companies) ---
+  const normalize = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // Generic industry/segment/geo words must NOT count as a company match, or any
+  // education/hospitality exec would match "X International School", "Y Resort", etc.
+  const stop = new Set([
+    "pte", "ltd", "inc", "llc", "group", "holdings", "company", "co", "the", "and",
+    "sdn", "bhd", "limited", "corporation", "corp", "pt", "tbk", "services", "solutions", "global",
+    "international", "school", "schools", "academy", "college", "university", "institute",
+    "club", "clubs", "resort", "resorts", "hotel", "hotels", "spa", "spas", "pool", "pools",
+    "recovery", "wellness", "fitness", "gym", "studio", "studios", "centre", "center",
+    "hospitality", "property", "properties", "realty", "development", "developments",
+    "food", "beverage", "agribusiness", "water", "treatment", "systems", "system",
+    "technology", "technologies", "management", "consulting", "consultancy", "partners",
+    "premium", "luxury", "boutique", "private", "public", "national",
+    "asia", "asean", "indonesia", "singapore", "malaysia", "thailand", "vietnam",
+    "philippines", "japan", "australia", "bali", "jakarta", "bangkok", "manila",
+  ]);
+  const companyTokens = (name: string): string[] =>
+    (name || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !stop.has(w));
+  const domainCore = (url?: string): string => {
+    if (!url) return "";
+    try { return new URL(url).hostname.replace(/^www\./, "").split(".")[0] || ""; } catch { return ""; }
+  };
+
+  const core = normalize(domainCore(leadUrl));
+  const fullName = normalize(leadName);
+  const tokens = companyTokens(leadName).map(normalize).filter(t => t.length >= 5);
+
+  // Verify against the REAL cached profile text (headline/employer), NOT Exa's
+  // `summary` — the summary is query-conditioned and echoes the searched company
+  // name into every result, so it falsely "confirms" everyone.
+  const referencesCompany = (haystackRaw: string): boolean => {
+    const haystack = normalize(haystackRaw);
+    if (core.length >= 4 && haystack.includes(core)) return true;
+    if (fullName.length >= 5 && haystack.includes(fullName)) return true;
+    return tokens.some(t => haystack.includes(t));
+  };
+  const isLikelyPersonName = (name: string): boolean => {
+    const n = (name || "").trim();
+    if (!n || n.length > 50) return false;
+    if (/[!?:;]|\.{2,}/.test(n)) return false;
+    return n.split(/\s+/).length <= 6;
+  };
 
   try {
     const exaRes = await fetch("https://api.exa.ai/search", {
@@ -420,9 +608,10 @@ api.post("/api/find-contacts", async (req: Request, res: Response) => {
       body: JSON.stringify({
         query: `CEO OR Founder OR Director OR Owner "${leadName}" ${city || ""}`,
         type: "neural",
-        numResults: 3,
+        numResults: 8,
         includeDomains: ["linkedin.com"],
-        contents: { summary: true },
+        // Cached page text + highlights for verification — NOT the query-poisoned summary.
+        contents: { text: { maxCharacters: 1500 }, highlights: true },
       }),
     });
 
@@ -431,27 +620,58 @@ api.post("/api/find-contacts", async (req: Request, res: Response) => {
     }
 
     const data: any = await exaRes.json();
-    const contacts = (data.results || []).map((r: any) => ({
-      name: r.title || "Unknown",
-      title: extractTitle(r.summary || ""),
-      linkedinUrl: r.url || "",
-      source: "exa",
-    }));
+    const raw = data.results || [];
+    console.log(`[find-contacts] company="${leadName}" core="${core}" raw=${raw.length}`);
 
+    const contacts = raw
+      .map((r: any) => ({
+        r,
+        title: r.title || "",
+        profileText: `${r.title || ""} ${r.text || ""} ${(r.highlights || []).join(" ")}`,
+      }))
+      .filter(({ r, title, profileText }: any) => {
+        if (!/linkedin\.com\/in\//i.test(r.url || "")) {
+          console.log(`[find-contacts] DROP "${String(title).slice(0, 40)}" reason: not a personal profile (${r.url})`);
+          return false;
+        }
+        if (!isLikelyPersonName(title)) {
+          console.log(`[find-contacts] DROP "${String(title).slice(0, 40)}" reason: not a person name`);
+          return false;
+        }
+        if (!referencesCompany(profileText)) {
+          console.log(`[find-contacts] DROP "${title}" reason: company not referenced in profile text`);
+          return false;
+        }
+        return true;
+      })
+      .slice(0, 3)
+      .map(({ r, profileText }: any) => ({
+        name: r.title || "Unknown",
+        title: extractTitle(profileText),
+        linkedinUrl: r.url || "",
+        source: "exa",
+        verificationStatus: "verified" as const,
+      }));
+
+    console.log(`[find-contacts] verified=${contacts.length}`);
     return res.json({ contacts, source: "exa" });
   } catch {
     return res.json({ contacts: [], source: "exa" });
   }
 });
 
-function extractTitle(summary: string): string {
-  const m1 = summary.match(/is (?:the )?(?:current )?([A-Z][A-Za-z &\/\-]{3,50}?)\s+(?:at|of|for)\s/);
-  if (m1) return m1[1].trim();
-  const roles = ["Founder", "CEO", "Co-Founder", "Director", "Owner", "Managing Director", "General Manager"];
+// Parse a role from cached profile text. Returns "" when none is found — never
+// fabricates a title (an unverified role must not surface).
+function extractTitle(text: string): string {
+  const mAt = text.match(/(?:^|\n)\s*([A-Z][A-Za-z &\/\-]{2,60}?)\s+at\s+/);
+  if (mAt) return mAt[1].trim();
+  const mIs = text.match(/is (?:the )?(?:current )?([A-Z][A-Za-z &\/\-]{3,50}?)\s+(?:at|of|for)\s/);
+  if (mIs) return mIs[1].trim();
+  const roles = ["Co-Founder", "Founder", "CEO", "Managing Director", "General Manager", "Director", "Owner"];
   for (const role of roles) {
-    if (summary.includes(role)) return role;
+    if (text.includes(role)) return role;
   }
-  return "Executive";
+  return "";
 }
 
 // ============================================================
@@ -715,114 +935,130 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// POST /api/notify-signup — Notify admin when a new user signs up
+// ============================================================
+api.post("/api/notify-signup", async (req: Request, res: Response) => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ ok: false, error: "email is required" });
+  }
+
+  // If Resend isn't configured, succeed silently — never crash the signup flow.
+  if (!apiKey) {
+    return res.json({ ok: false });
+  }
+
+  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || "ngurah.linggih@gmail.com";
+  const timestamp = new Date().toISOString();
+
+  try {
+    const resendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM_EMAIL || "nura@biks.ai",
+        to: adminEmail,
+        subject: `New Biks.AI signup: ${email}`,
+        html: `<p>A new user just signed up for Biks.AI Sales Agent: ${email} at ${timestamp}.</p>`,
+      }),
+    });
+
+    if (!resendRes.ok) {
+      const errData: any = await resendRes.json();
+      return res.json({ ok: false, error: errData.message || "Send failed" });
+    }
+
+    const data: any = await resendRes.json();
+    return res.json({ ok: true, id: data.id });
+  } catch (e: any) {
+    return res.json({ ok: false, error: e.message });
+  }
+});
+
+// ============================================================
 // Shared HTML email builder
 // ============================================================
-function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: any[], painPoints?: any[]) {
-  const synergiesHtml = (salesKit.synergies || []).map((s: any) => `
-    <tr>
-      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.sellerProduct}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#e0e0e0;">${s.prospectPain}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #2a2a2a;font-size:13px;color:#999;font-style:italic;">${s.evidence}</td>
-    </tr>
-  `).join("");
+function buildKitEmailHtml(business: any, lead: any, salesKit: any, contacts: any[], _painPoints?: any[]) {
+  // Parchment palette inlined as literal hex (email clients don't support CSS vars).
+  // Personalized greeting: use the first verified contact's first name; strip any
+  // greeting the LLM already wrote so we never double up or render "Hi undefined".
+  const firstName = (contacts?.[0]?.name || "").trim().split(/\s+/)[0] || "";
+  const greeting = firstName ? `Hi ${firstName},` : "Hi there,";
+  const rawBody = salesKit.outreachEmailBody || "";
+  const bodyNoGreeting = rawBody.replace(/^\s*(hi|hello|dear)\b[^\n,]*,?\s*/i, "").trimStart();
+  const emailBody = `${greeting}\n\n${bodyNoGreeting}`;
 
-  const contactsHtml = (contacts || []).length > 0 ? `
-    <div style="margin-top:24px;padding:20px;background:#161616;border:1px solid #2a2a2a;border-radius:8px;">
-      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5b8af5;margin:0 0 12px;">Key Decision Makers</h3>
-      ${(contacts || []).map((c: any) => `
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #222;">
-          <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#5b8af5,#3ecf8e);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;">${(c.name || "?").charAt(0)}</div>
-          <div>
-            <div style="font-size:13px;color:#f0f0f0;font-weight:500;">${c.name}</div>
-            <div style="font-size:11px;color:#666;">${c.title}${c.linkedinUrl ? ` \u00b7 <a href="${c.linkedinUrl}" style="color:#5b8af5;text-decoration:none;">LinkedIn</a>` : ''}</div>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  ` : "";
+  const usp = (business.valueProposition || "").trim();
+  const uspHtml = usp ? `
+  <div style="padding:0 32px 8px;">
+    <p style="font-size:16px;line-height:1.5;color:#5A7A7E;font-style:italic;font-weight:600;margin:0;border-left:3px solid #8FA8AC;padding-left:14px;">${usp}</p>
+  </div>` : "";
+
+  const whyFits = (salesKit.whyThisProspect || []).slice(0, 3);
+  const whyFitsHtml = whyFits.length > 0 ? `
+  <div style="padding:24px 32px 8px;">
+    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6A6460;margin:0 0 14px;">Why It Fits</h3>
+    ${whyFits.map((point: string) => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;">
+        <span style="color:#5A7A7E;font-size:14px;line-height:1.6;flex-shrink:0;">\u2022</span>
+        <span style="font-size:14px;color:#3A3632;line-height:1.6;">${point}</span>
+      </div>`).join("")}
+  </div>` : "";
+
+  const stats = (salesKit.proofStats || []).filter((s: any) => s && (s.number || s.label));
+  const statsHtml = stats.length > 0 ? `
+  <div style="padding:24px 32px 8px;">
+    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6A6460;margin:0 0 12px;">By The Numbers</h3>
+    <table style="width:100%;border-collapse:separate;border-spacing:8px 0;"><tr>
+      ${stats.map((s: any) => `
+        <td style="background:#F9F7F2;border:1px solid #E3DDD2;border-radius:10px;padding:16px 10px;text-align:center;vertical-align:top;">
+          <div style="font-size:22px;font-weight:700;color:#201E1A;">${s.number || ""}</div>
+          <div style="font-size:11px;color:#6A6460;margin-top:4px;">${s.label || ""}</div>
+        </td>`).join("")}
+    </tr></table>
+  </div>` : "";
 
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#0f0f0f;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<div style="max-width:600px;margin:0 auto;background:#0f0f0f;padding:0;">
-  <!-- Header -->
-  <div style="padding:24px 32px;border-bottom:1px solid #1e1e1e;">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div style="width:24px;height:24px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:10px;font-weight:900;color:#0f0f0f;">B</span>
-      </div>
-      <span style="font-size:16px;font-weight:700;color:#f0f0f0;font-family:'DM Serif Display',serif;">Biks.ai</span>
-    </div>
-  </div>
-
+<body style="margin:0;padding:0;background:#EDE8DF;font-family:'General Sans','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<div style="max-width:600px;margin:0 auto;background:#EDE8DF;padding:0;">
   <!-- Hero -->
-  <div style="padding:40px 32px;text-align:center;background:linear-gradient(180deg,#111 0%,#0f0f0f 100%);">
-    <div style="font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#5b8af5;margin-bottom:12px;">PARTNERSHIP OPPORTUNITY</div>
-    <h1 style="font-size:24px;font-weight:700;color:#f0f0f0;margin:0 0 8px;line-height:1.3;">${business.companyName} \u00d7 ${lead.name}</h1>
-    <p style="font-size:14px;color:#888;margin:0;">${lead.category || ''} ${lead.city ? '\u00b7 ' + lead.city : ''}</p>
+  <div style="padding:40px 32px;text-align:center;background:#F4F0E8;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#5A7A7E;margin-bottom:12px;">PARTNERSHIP OPPORTUNITY</div>
+    <h1 style="font-size:24px;font-weight:600;color:#201E1A;margin:0;line-height:1.3;letter-spacing:-0.02em;">${business.companyName} \u00d7 ${lead.name}</h1>
   </div>
 
   <!-- Outreach Message -->
   <div style="padding:32px;">
-    <div style="background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:24px;">
-      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3ecf8e;margin:0 0 16px;">Message</h3>
-      <div style="font-size:14px;color:#ccc;line-height:1.8;white-space:pre-wrap;">${salesKit.outreachEmailBody}</div>
+    <div style="background:#F4F0E8;border:1px solid #E3DDD2;border-radius:10px;padding:24px;">
+      <div style="font-size:14px;color:#3A3632;line-height:1.8;white-space:pre-wrap;">${emailBody}</div>
     </div>
   </div>
 
-  <!-- Why Relevant Now -->
-  <div style="padding:0 32px 24px;">
-    <div style="background:#0e1e16;border:1px solid #2a4a37;border-radius:10px;padding:20px;">
-      <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3ecf8e;margin:0 0 10px;">Why Relevant Now</h3>
-      <p style="font-size:13px;color:#a0d4b8;line-height:1.6;margin:0;">${salesKit.whyRelevantNow}</p>
-    </div>
-  </div>
-
-  <!-- Pain Points from Reviews -->
-  ${Array.isArray(painPoints) && painPoints.length > 0 ? `
-  <div style="padding:0 32px 24px;">
-    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#f5454a;margin:0 0 12px;">Customer Pain Points We Can Solve</h3>
-    <div style="background:#1a1515;border:1px solid #3a2020;border-radius:8px;padding:16px;">
-      ${painPoints.slice(0, 3).map((pp: any) => `
-        <div style="padding:8px 0;border-bottom:1px solid #2a2020;">
-          <div style="font-size:13px;color:#f0f0f0;font-weight:500;margin-bottom:4px;">${pp.issue}</div>
-          <div style="font-size:11px;color:#888;font-style:italic;">&ldquo;${pp.evidence}&rdquo;</div>
-        </div>
-      `).join("")}
-    </div>
-  </div>
-  ` : ""}
-
-  <!-- Synergies -->
-  <div style="padding:0 32px 24px;">
-    <h3 style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#444;margin:0 0 12px;">Top Synergies</h3>
-    <table style="width:100%;border-collapse:collapse;background:#161616;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;">
-      <tr style="background:#1a1a1a;">
-        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#5b8af5;text-align:left;border-bottom:1px solid #2a2a2a;">Our Solution</th>
-        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#f5454a;text-align:left;border-bottom:1px solid #2a2a2a;">Your Need</th>
-        <th style="padding:10px 14px;font-size:11px;font-weight:700;color:#3ecf8e;text-align:left;border-bottom:1px solid #2a2a2a;">Evidence</th>
-      </tr>
-      ${synergiesHtml}
-    </table>
-  </div>
-
-  <!-- Contacts -->
-  ${contactsHtml}
+  ${uspHtml}
+  ${whyFitsHtml}
+  ${statsHtml}
 
   <!-- CTA -->
   <div style="padding:32px;text-align:center;">
-    <div style="background:linear-gradient(135deg,#5b8af5,#3ecf8e);border-radius:10px;padding:32px;">
-      <h3 style="font-size:18px;font-weight:700;color:#fff;margin:0 0 12px;">Let's Explore This Together</h3>
-      <p style="font-size:13px;color:rgba(255,255,255,0.8);margin:0 0 20px;">${salesKit.suggestedAngle}</p>
-      <a href="${business.website || '#'}" style="display:inline-block;background:#fff;color:#0f0f0f;font-size:13px;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;">Schedule a Call \u2192</a>
+    <div style="background:#201E1A;border-radius:10px;padding:32px;">
+      <h3 style="font-size:18px;font-weight:600;color:#F4F0E8;margin:0 0 12px;">Let's Explore This Together</h3>
+      <p style="font-size:13px;color:rgba(244,240,232,0.75);margin:0 0 20px;">${salesKit.suggestedAngle}</p>
+      <a href="${business.website || '#'}" style="display:inline-block;background:#F4F0E8;color:#201E1A;font-size:13px;font-weight:600;padding:12px 28px;border-radius:10px;text-decoration:none;">Schedule a Call \u2192</a>
     </div>
   </div>
 
   <!-- Footer -->
-  <div style="padding:24px 32px;border-top:1px solid #1e1e1e;text-align:center;">
-    <p style="font-size:11px;color:#555;margin:0;">Sent via <span style="color:#f0f0f0;font-weight:600;">Biks.ai</span> \u2014 AI-powered sales intelligence</p>
-    <p style="font-size:10px;color:#333;margin:8px 0 0;">From ${business.companyName} \u2022 ${business.website || ''}</p>
+  <div style="padding:24px 32px;border-top:1px solid #E3DDD2;text-align:center;">
+    <p style="font-size:11px;color:#6A6460;margin:0;">Sent via <span style="color:#201E1A;font-weight:600;">Biks.ai</span> \u2014 AI-powered sales intelligence</p>
+    <p style="font-size:10px;color:#9A9590;margin:8px 0 0;">From ${business.companyName} \u2022 ${business.website || ''}</p>
+    <p style="font-size:10px;color:#9A9590;margin:12px 0 0;"><a href="#" style="color:#6A6460;text-decoration:underline;">Unsubscribe</a></p>
   </div>
 </div>
 </body>
@@ -980,7 +1216,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
     // Step 2: Use LLM to analyze reviews and extract pain points
     const analysisPrompt = `You are analyzing customer reviews and feedback about "${leadName}" (${leadUrl || ""}).
 
-Here is the review/feedback content found online:
+Here is the content found online (may or may not contain real customer reviews):
 ${reviewTexts}
 
 Our company offers these products/services:
@@ -988,7 +1224,13 @@ ${(sellerProducts || []).join(", ")}
 
 Our company summary: ${sellerSummary || ""}
 
-Analyze the reviews and return ONLY valid JSON with this structure:
+CRITICAL GROUNDING RULES:
+- The content above is web search results — it often is NOT real customer reviews (directory listings, the company's own marketing pages, unrelated content).
+- Only extract a review or pain point if the content contains ACTUAL customer feedback about ${leadName}. Each "evidence" MUST be a real quote/paraphrase taken from the content above.
+- Do NOT invent reviews, ratings, complaints, or pain points. Do NOT infer problems that aren't stated by a customer.
+- If the content does not contain genuine customer reviews of ${leadName}, return EMPTY arrays for reviews, painPoints, and solutionMapping, and set summary to "No genuine customer reviews found for this company."
+
+Return ONLY valid JSON with this structure:
 {
   "reviews": [
     {
@@ -1016,7 +1258,7 @@ Analyze the reviews and return ONLY valid JSON with this structure:
   "summary": "2-3 sentence summary of the prospect's main weaknesses/pain points that we can address"
 }
 
-Focus on NEGATIVE reviews and complaints. Extract 3-6 pain points. Map each to our solutions where possible. If reviews are mostly positive, still identify areas of improvement or gaps we can fill.`;
+Prioritize NEGATIVE reviews and complaints when genuine customer feedback exists. Extract up to 6 pain points — but ONLY those backed by real customer feedback in the content. It is correct and expected to return fewer (or zero) when the content has no genuine reviews. Never pad the list with invented or inferred problems.`;
 
     const taskId = await startManusTask(analysisPrompt, {
       type: "object",

@@ -1,5 +1,7 @@
 import { useState, type CSSProperties } from "react";
 import type { BusinessProfile, Lead, MemoryItem, Contact } from "../App";
+import { useIsMobile } from "../hooks/useMobile";
+import Tooltip from "../components/Tooltip";
 
 interface Props {
   business: BusinessProfile;
@@ -17,6 +19,7 @@ interface Props {
 export default function AccountsStep({
   business, memories, setMemories, leads, setLeads, contacts, setContacts, onSelectLead, onBack, initialCategory = 0
 }: Props) {
+  const isMobile = useIsMobile();
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
@@ -122,12 +125,21 @@ export default function AccountsStep({
   };
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 57px)", overflow: "hidden" }}>
+    <div style={{
+      display: "flex",
+      flexDirection: isMobile ? "column" : "row",
+      height: isMobile ? "auto" : "calc(100vh - 57px)",
+      minHeight: isMobile ? "calc(100vh - 57px)" : undefined,
+      overflow: isMobile ? "visible" : "hidden",
+    }}>
       {/* Sidebar */}
       <div style={{
-        width: 264, flexShrink: 0, background: "var(--bg)",
-        borderRight: "1px solid var(--line)", height: "100%",
-        overflowY: "auto", padding: "28px 20px",
+        width: isMobile ? "100%" : 264, flexShrink: 0, background: "var(--bg)",
+        borderRight: isMobile ? undefined : "1px solid var(--line)",
+        borderBottom: isMobile ? "1px solid var(--line)" : undefined,
+        height: isMobile ? "auto" : "100%",
+        overflowY: isMobile ? "visible" : "auto",
+        padding: isMobile ? "20px 16px" : "28px 20px",
         display: "flex", flexDirection: "column",
       }}>
         <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", marginBottom: 8 }}>
@@ -138,15 +150,17 @@ export default function AccountsStep({
         </div>
 
         {/* Target market selector */}
-        <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", marginBottom: 8 }}>
           TARGET MARKET
+          <Tooltip text="The market segment Biks will search for prospects in." />
         </div>
-        {business.expansionCategories.map((cat, i) => (
+        {business.expansionCategories.slice(0, 3).map((cat, i) => (
           <button key={i} onClick={() => setSelectedCategory(i)} style={{
             width: "100%", textAlign: "left",
             background: selectedCategory === i ? "var(--sage-wash)" : "var(--surface)",
             border: `1px solid ${selectedCategory === i ? "var(--sage)" : "var(--line)"}`,
             borderRadius: "var(--radius-md)", padding: "9px 12px", marginBottom: 6,
+            minHeight: isMobile ? 44 : undefined,
             fontSize: 13, color: selectedCategory === i ? "var(--sage-strong)" : "var(--ink-3)",
             cursor: "pointer", fontFamily: "var(--font-sans)",
           }}>
@@ -167,7 +181,7 @@ export default function AccountsStep({
             width: "100%",
             background: "var(--surface-2)", border: "1px solid var(--line)",
             borderRadius: "var(--radius-md)", padding: "9px 12px",
-            fontSize: 13, color: "var(--ink)", outline: "none",
+            fontSize: isMobile ? 16 : 13, color: "var(--ink)", outline: "none",
             fontFamily: "var(--font-sans)",
             cursor: "pointer",
             appearance: "none",
@@ -189,6 +203,7 @@ export default function AccountsStep({
           disabled={searching}
           style={{
             width: "100%", marginTop: 16,
+            minHeight: isMobile ? 44 : undefined,
             background: "var(--action)", color: "var(--action-fg)", border: "none",
             borderRadius: "var(--radius-md)", padding: "11px 16px", fontSize: 14, fontWeight: 600,
             cursor: searching ? "not-allowed" : "pointer", opacity: searching ? 0.5 : 1,
@@ -206,7 +221,12 @@ export default function AccountsStep({
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, height: "100%", overflowY: "auto", padding: "32px 40px" }}>
+      <div style={{
+        flex: 1,
+        height: isMobile ? "auto" : "100%",
+        overflowY: isMobile ? "visible" : "auto",
+        padding: isMobile ? "20px 16px" : "32px 40px",
+      }}>
         <div style={{ marginBottom: 24 }}>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)" }}>Leads</h2>
           <p style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
@@ -250,7 +270,7 @@ export default function AccountsStep({
               opacity: lead.status === "rejected" ? 0.45 : 1,
               animation: "fadeIn 0.3s ease",
             }}>
-              <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+              <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 12 : 20, alignItems: "flex-start" }}>
                 {/* Left: company + evidence */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={fieldLabel}>Company Name</div>
@@ -284,22 +304,28 @@ export default function AccountsStep({
                 </div>
 
                 {/* Right: relevance + decision */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                  <div style={fieldLabel}>Relevance</div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: isMobile ? "flex-start" : "flex-end", gap: 4, flexShrink: 0 }}>
+                  <div style={{ ...fieldLabel, display: "flex", alignItems: "center" }}>
+                    Relevance
+                    <Tooltip text="How well this lead fits, based on segment, location, and your saved preferences. High / Medium / Low." />
+                  </div>
                   <RelevanceBadge label={getRelevanceLabel(lead.fitScore)} />
 
-                  <div style={{ ...fieldLabel, marginTop: 12 }}>Decision</div>
+                  <div style={{ ...fieldLabel, marginTop: 12, display: "flex", alignItems: "center" }}>
+                    Decision
+                    <Tooltip text="Accept a lead to generate its marketing kit, or reject it (Biks remembers why and improves future results)." />
+                  </div>
                   {lead.status === "pending" && (
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => handleAccept(idx)} style={{
                         background: "none", border: "1px solid var(--success)", color: "var(--success)",
-                        borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        borderRadius: 6, padding: "5px 12px", minHeight: isMobile ? 40 : undefined, fontSize: 12, fontWeight: 600, cursor: "pointer",
                       }}>
                         Accept
                       </button>
                       <button onClick={() => setRejectModal(idx)} style={{
                         background: "none", border: "1px solid var(--danger)", color: "var(--danger-text)",
-                        borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        borderRadius: 6, padding: "5px 12px", minHeight: isMobile ? 40 : undefined, fontSize: 12, fontWeight: 600, cursor: "pointer",
                       }}>
                         Reject
                       </button>
@@ -308,7 +334,7 @@ export default function AccountsStep({
                   {lead.status === "accepted" && (
                     <button onClick={() => onSelectLead(lead)} style={{
                       background: "var(--action)", color: "var(--action-fg)", border: "none",
-                      borderRadius: 6, padding: "7px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      borderRadius: 6, padding: "7px 16px", minHeight: isMobile ? 40 : undefined, fontSize: 12, fontWeight: 600, cursor: "pointer",
                     }}>
                       Generate Brief
                     </button>

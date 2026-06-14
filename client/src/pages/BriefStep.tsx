@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import type { BusinessProfile, Lead, MemoryItem, MeetingBrief, Contact, SalesKit, ReviewAnalysis } from "../App";
+import { useIsMobile } from "../hooks/useMobile";
+import Tooltip from "../components/Tooltip";
 
 interface Props {
   business: BusinessProfile;
@@ -17,6 +19,7 @@ interface Props {
 }
 
 export default function BriefStep({ business, lead, memories, brief, setBrief, contacts, setContacts, salesKit, setSalesKit, reviewAnalysis, setReviewAnalysis, onBack }: Props) {
+  const isMobile = useIsMobile();
   const [tab, setTab] = useState<"account" | "email" | "meeting" | "kit">("account");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
@@ -310,12 +313,21 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
   };
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 57px)", overflow: "hidden" }}>
+    <div style={{
+      display: "flex",
+      flexDirection: isMobile ? "column" : "row",
+      height: isMobile ? "auto" : "calc(100vh - 57px)",
+      minHeight: isMobile ? "calc(100vh - 57px)" : undefined,
+      overflow: isMobile ? "visible" : "hidden",
+    }}>
       {/* Sidebar */}
       <div style={{
-        width: 264, flexShrink: 0, background: "var(--bg)",
-        borderRight: "1px solid var(--line)", height: "100%",
-        overflowY: "auto", padding: "28px 20px",
+        width: isMobile ? "100%" : 264, flexShrink: 0, background: "var(--bg)",
+        borderRight: isMobile ? "none" : "1px solid var(--line)",
+        borderBottom: isMobile ? "1px solid var(--line)" : undefined,
+        height: isMobile ? "auto" : "100%",
+        overflowY: isMobile ? "visible" : "auto",
+        padding: isMobile ? "20px 16px" : "28px 20px",
         display: "flex", flexDirection: "column",
       }}>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
@@ -388,7 +400,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, height: "100%", overflowY: "auto", padding: "32px 40px" }}>
+      <div style={{
+        flex: 1,
+        height: isMobile ? "auto" : "100%",
+        overflowY: isMobile ? "visible" : "auto",
+        padding: isMobile ? "20px 16px" : "32px 40px",
+      }}>
         {loading ? (
           <div style={{ textAlign: "center", paddingTop: 80 }}>
             <div style={{
@@ -417,7 +434,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                   onClick={() => setTab(t.key)}
                   style={{
                     background: "none", border: "none",
-                    padding: "12px 20px", fontSize: 14, fontWeight: 500,
+                    padding: isMobile ? "12px 14px" : "12px 20px", fontSize: 14, fontWeight: 500,
                     color: tab === t.key ? "var(--ink)" : "var(--ink-3)",
                     borderBottom: tab === t.key ? "2px solid var(--ink)" : "2px solid transparent",
                     cursor: "pointer", fontFamily: "var(--font-sans)",
@@ -576,6 +593,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                             SOLUTION MAPPING
                           </div>
                           <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+                            {!isMobile && (
                             <div style={{
                               display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
                               background: "var(--surface)", padding: "10px 14px",
@@ -585,9 +603,11 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Our Solution</span>
                               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Talking Point</span>
                             </div>
+                            )}
                             {reviewAnalysis.solutionMapping.map((sm, i) => (
                               <div key={i} style={{
-                                display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                                display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1.5fr",
+                                gap: isMobile ? 4 : undefined,
                                 padding: "10px 14px", background: "var(--surface)",
                                 borderBottom: i < reviewAnalysis.solutionMapping.length - 1 ? "1px solid var(--line)" : "none",
                               }}>
@@ -606,7 +626,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                             REVIEW SNIPPETS
                           </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
                             {reviewAnalysis.reviews
                         .sort((a, b) => (a.sentiment === "negative" ? -1 : 1) - (b.sentiment === "negative" ? -1 : 1))
                         .slice(0, 4).map((rev, i) => (
@@ -674,7 +694,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                   </div>
                   <div style={{
                     background: "var(--surface)", border: "1px solid var(--line)",
-                    borderRadius: "var(--radius-md)", padding: "16px 20px", fontSize: 14, color: "var(--ink-2)",
+                    borderRadius: "var(--radius-md)", padding: isMobile ? "14px 16px" : "16px 20px", fontSize: 14, color: "var(--ink-2)",
                     lineHeight: 1.7, whiteSpace: "pre-wrap",
                   }}>
                     {brief.outreachEmailBody}
@@ -684,7 +704,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                 {/* Send email */}
                 <div style={{
                   background: "var(--surface)", border: "1px solid var(--line)",
-                  borderRadius: "var(--radius-md)", padding: "16px 20px", marginTop: 24,
+                  borderRadius: "var(--radius-md)", padding: isMobile ? "14px 16px" : "16px 20px", marginTop: 24,
                 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
                     SEND VIA RESEND
@@ -695,7 +715,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       <span style={{ fontSize: 14, color: "var(--success)" }}>Email sent successfully!</span>
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10, alignItems: isMobile ? "stretch" : "center" }}>
                       <input
                         type="email"
                         value={emailTo}
@@ -703,7 +723,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         placeholder="Enter recipient email"
                         style={{
                           flex: 1, background: "var(--surface-2)", border: "1px solid var(--line)",
-                          borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: 14, color: "var(--ink)",
+                          borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: isMobile ? 16 : 14, color: "var(--ink)",
                           outline: "none", fontFamily: "var(--font-sans)",
                         }}
                       />
@@ -716,6 +736,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                           cursor: (emailSending || !hasEmail) ? "not-allowed" : "pointer",
                           opacity: (emailSending || !hasEmail) ? 0.5 : 1,
                           fontFamily: "var(--font-sans)", whiteSpace: "nowrap",
+                          minHeight: isMobile ? 44 : undefined,
                         }}
                       >
                         {emailSending ? "Sending..." : "Send Email"}
@@ -792,8 +813,9 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                 ) : salesKit ? (
                   <>
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                         SUGGESTED BD / SALES ANGLE
+                        <Tooltip text="A one-line pitch angle tailored to this prospect." />
                       </div>
                       <div style={{
                         background: "var(--success-wash)", border: "1px solid var(--success)",
@@ -805,10 +827,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
                     {/* Synergies Table */}
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                         TOP SYNERGIES
+                        <Tooltip text="How this seller's products map to the prospect's likely needs." />
                       </div>
                       <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+                        {!isMobile && (
                         <div style={{
                           display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
                           background: "var(--surface)", padding: "10px 14px",
@@ -818,9 +842,11 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>Prospect Pain</span>
                           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Evidence</span>
                         </div>
+                        )}
                         {salesKit.synergies.map((s, i) => (
                           <div key={i} style={{
-                            display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr",
+                            display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1.5fr",
+                            gap: isMobile ? 4 : undefined,
                             padding: "10px 14px", background: "var(--surface)",
                             borderBottom: i < salesKit.synergies.length - 1 ? "1px solid var(--line)" : "none",
                           }}>
@@ -834,12 +860,13 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 
                     {/* Outreach Email Draft */}
                     <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
                         OUTREACH EMAIL DRAFT
+                        <Tooltip text="A ready-to-send email personalized to this prospect." />
                       </div>
                       <div style={{
                         background: "var(--surface)", border: "1px solid var(--line)",
-                        borderRadius: "var(--radius-md)", padding: "16px 20px", marginBottom: 12,
+                        borderRadius: "var(--radius-md)", padding: isMobile ? "14px 16px" : "16px 20px", marginBottom: 12,
                       }}>
                         <div style={{ fontSize: 12, color: "var(--sage-strong)", fontWeight: 600, marginBottom: 8 }}>
                           Subject: {salesKit.outreachEmailSubject}
@@ -885,7 +912,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               <iframe
                                 srcDoc={emailPreviewHtml}
                                 style={{
-                                  width: "100%", height: 500, border: "none",
+                                  width: "100%", height: isMobile ? 360 : 500, border: "none",
                                   background: "var(--bg)",
                                 }}
                                 sandbox="allow-same-origin"
@@ -899,10 +926,11 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {/* Send Kit Email */}
                       <div style={{
                         background: "var(--surface)", border: "1px solid var(--line)",
-                        borderRadius: "var(--radius-md)", padding: "16px 20px", marginTop: 16,
+                        borderRadius: "var(--radius-md)", padding: isMobile ? "14px 16px" : "16px 20px", marginTop: 16,
                       }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
                           SEND MARKETING EMAIL
+                          <Tooltip text="Sends the branded email to the recipient. Edit the address or add another before sending." />
                         </div>
                         <div>
                           {/* Success line — stays visible while still allowing another send */}
@@ -912,7 +940,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               <span style={{ fontSize: 14, color: "var(--success)" }}>Sent to {kitSentTo}. Add another recipient below to send again.</span>
                             </div>
                           )}
-                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 10, alignItems: isMobile ? "stretch" : "center" }}>
                             <input
                               type="email"
                               value={emailTo}
@@ -920,7 +948,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               placeholder="Enter recipient email"
                               style={{
                                 flex: 1, background: "var(--surface-2)", border: "1px solid var(--line)",
-                                borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: 14, color: "var(--ink)",
+                                borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: isMobile ? 16 : 14, color: "var(--ink)",
                                 outline: "none", fontFamily: "var(--font-sans)",
                               }}
                             />
@@ -933,6 +961,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                                 cursor: (kitEmailSending || !hasEmail) ? "not-allowed" : "pointer",
                                 opacity: (kitEmailSending || !hasEmail) ? 0.5 : 1,
                                 fontFamily: "var(--font-sans)", whiteSpace: "nowrap",
+                                minHeight: isMobile ? 44 : undefined,
                               }}
                             >
                               {kitEmailSending ? "Sending..." : kitEmailSent ? "Send to Another" : "Send Marketing Email"}
@@ -996,6 +1025,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
 }
 
 function Section({ title, content }: { title: string; content: string }) {
+  const isMobile = useIsMobile();
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
@@ -1003,7 +1033,7 @@ function Section({ title, content }: { title: string; content: string }) {
       </div>
       <div style={{
         background: "var(--surface)", border: "1px solid var(--line)",
-        borderRadius: "var(--radius-md)", padding: "16px 20px", fontSize: 14, color: "var(--ink-2)", lineHeight: 1.7,
+        borderRadius: "var(--radius-md)", padding: isMobile ? "14px 16px" : "16px 20px", fontSize: 14, color: "var(--ink-2)", lineHeight: 1.7,
       }}>
         {content}
       </div>
