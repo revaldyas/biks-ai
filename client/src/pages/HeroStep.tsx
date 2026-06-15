@@ -150,16 +150,6 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
             : "linear-gradient(to right, var(--bg) 0%, rgba(237,232,223,0.92) 30%, rgba(237,232,223,0.42) 52%, rgba(237,232,223,0.06) 78%, rgba(237,232,223,0) 100%)",
         }} />
 
-        {/* Floating capability chips (desktop only) */}
-        {!isMobile && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>
-            {HERO_CHIPS.map((c, i) => (
-              <div key={c.label} style={{ position: "absolute", top: c.top, right: c.right, animation: `rise 0.6s ease ${0.3 + i * 0.12}s both` }}>
-                <ChipPill label={c.label} />
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* Content */}
         <div style={{ position: "relative", zIndex: 3, width: "100%", maxWidth: 1180, margin: "0 auto", padding: isMobile ? "44px 16px 40px" : "72px 24px" }}>
@@ -214,12 +204,6 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
               Start free · 7-day trial · no card required
             </p>
 
-            {/* Capability chips (mobile) */}
-            {isMobile && (
-              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 20 }}>
-                {HERO_CHIPS.slice(0, 3).map((c) => <ChipPill key={c.label} label={c.label} />)}
-              </div>
-            )}
 
             {/* Progress */}
             {loading && (
@@ -244,6 +228,9 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
           </div>
         </div>
       </section>
+
+      {/* Capability flow — the five steps, below the video */}
+      <CapabilityFlow isMobile={isMobile} />
 
       {/* How it works */}
       <Reveal>
@@ -413,30 +400,85 @@ const PAINS = [
   "want warmer outreach",
 ];
 
-// Floating capability chips over the hero video (Anthropic-style), Biks features.
-const HERO_CHIPS = [
-  { label: "Analyze your website", top: "15%", right: "7%" },
-  { label: "Find real leads", top: "33%", right: "20%" },
-  { label: "Verify decision-makers", top: "50%", right: "5%" },
-  { label: "Draft outreach", top: "67%", right: "19%" },
-  { label: "Discover new markets", top: "82%", right: "8%" },
+// The five Biks capabilities, in pipeline order. Rendered as a horizontal
+// flow bar directly below the hero video (desktop) / a clean numbered list (mobile).
+const HERO_STEPS = [
+  { label: "Analyze your website" },
+  { label: "Discover new markets" },
+  { label: "Find real leads" },
+  { label: "Verify decision-makers" },
+  { label: "Draft outreach" },
 ];
 
-function ChipPill({ label }: { label: string }) {
+function BadgeNum({ n }: { n: number }) {
   return (
     <span style={{
-      display: "inline-flex", alignItems: "center", gap: 8,
-      background: "rgba(249, 247, 242, 0.78)", backdropFilter: "blur(8px)",
-      WebkitBackdropFilter: "blur(8px)",
-      border: "1px solid var(--line)", borderRadius: 999,
-      padding: "9px 14px", boxShadow: "var(--shadow-2)",
-      fontSize: 12, fontWeight: 700, fontFamily: "var(--font-mono)",
-      letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink-2)",
-      whiteSpace: "nowrap", pointerEvents: "auto",
+      flexShrink: 0,
+      width: 26, height: 26, borderRadius: "50%",
+      background: "var(--sage-wash)", color: "var(--sage-strong)",
+      border: "1px solid var(--line)",
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)",
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--sage-strong)", flexShrink: 0 }} />
-      {label}
+      {String(n).padStart(2, "0")}
     </span>
+  );
+}
+
+// The capability "flow bar" — sits under the hero, not over the video.
+// Desktop: one horizontal strip of numbered steps joined by arrows.
+// Mobile: a tidy numbered list.
+function CapabilityFlow({ isMobile }: { isMobile: boolean }) {
+  const labelStyle = {
+    fontSize: isMobile ? 13 : 12, fontWeight: 700, fontFamily: "var(--font-mono)",
+    letterSpacing: "0.04em", textTransform: "uppercase" as const, color: "var(--ink-2)",
+    whiteSpace: "nowrap" as const,
+  };
+
+  if (isMobile) {
+    return (
+      <Reveal>
+        <div style={{ width: "100%", maxWidth: 460, margin: "0 auto", padding: "20px 16px 4px" }}>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)", overflow: "hidden" }}>
+            {HERO_STEPS.map((s, i) => (
+              <div key={s.label} style={{
+                display: "flex", alignItems: "center", gap: 12, padding: "13px 16px",
+                borderBottom: i === HERO_STEPS.length - 1 ? "none" : "1px solid var(--line)",
+              }}>
+                <BadgeNum n={i + 1} />
+                <span style={labelStyle}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Reveal>
+    );
+  }
+
+  // Desktop: a horizontal stepper — five equal columns, each a numbered badge
+  // over a centered label, joined by a connector line. Always one tidy row.
+  return (
+    <Reveal>
+      <div style={{ width: "100%", maxWidth: 1040, margin: "0 auto", padding: "40px 24px 8px" }}>
+        <div style={{
+          display: "flex", alignItems: "flex-start",
+          background: "var(--surface)", border: "1px solid var(--line)",
+          borderRadius: "var(--radius-xl)", padding: "22px 24px", boxShadow: "var(--shadow-1)",
+        }}>
+          {HERO_STEPS.map((s, i) => (
+            <div key={s.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+              {/* badge + connector line */}
+              <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+                <span style={{ flex: 1, height: 1.5, background: i === 0 ? "transparent" : "var(--line-strong)" }} />
+                <BadgeNum n={i + 1} />
+                <span style={{ flex: 1, height: 1.5, background: i === HERO_STEPS.length - 1 ? "transparent" : "var(--line-strong)" }} />
+              </div>
+              <span style={{ ...labelStyle, marginTop: 12, whiteSpace: "normal", maxWidth: 130, lineHeight: 1.35 }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Reveal>
   );
 }
 

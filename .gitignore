@@ -114,3 +114,5 @@ client/public/__manus__/version.json
 .project-config.json
 .vercel
 api/handler.js
+.asset-backups/
+.claude/
