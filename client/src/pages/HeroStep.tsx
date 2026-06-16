@@ -133,13 +133,13 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
         {/* Background video */}
         <video
           autoPlay={!reduceMotion} muted loop playsInline preload="metadata"
-          poster="/hero-woman-poster.jpg?v=4"
+          poster="/hero-woman-poster.jpg?v=5"
           aria-hidden="true"
           disablePictureInPicture
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: isMobile ? "center 32%" : "center 34%" }}
         >
-          <source src="/hero-woman.webm?v=4" type="video/webm" />
-          <source src="/hero-woman.mp4?v=4" type="video/mp4" />
+          <source src="/hero-woman.webm?v=5" type="video/webm" />
+          <source src="/hero-woman.mp4?v=5" type="video/mp4" />
         </video>
 
         {/* Parchment legibility overlay — keeps the left copy readable, lets her show on the right */}
