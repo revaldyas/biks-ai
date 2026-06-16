@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { ENV } from "./_core/env";
 import { manusTask, startManusTask, checkManusTask } from "./_core/manus";
-import { type PlacesSearchResult, type PlaceDetailsResult } from "./_core/map";
 import {
   isSupabaseConfigured,
   verifyRequestUser,
@@ -615,15 +614,25 @@ api.post("/api/find-contacts", async (req: Request, res: Response) => {
   const core = normalize(domainCore(leadUrl));
   const fullName = normalize(leadName);
   const tokens = companyTokens(leadName).map(normalize).filter(t => t.length >= 5);
+  // Adjacent-word fingerprints (bigrams) of the company name — a far stronger
+  // signal than one shared word. "Mantra Wellness Bali" -> mantrawellness,
+  // wellnessbali. Stops a CEO of "Eco-Mantra" matching on the lone word "mantra".
+  const words = String(leadName || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const bigrams: string[] = [];
+  for (let i = 0; i < words.length - 1; i++) bigrams.push(normalize(words[i] + words[i + 1]));
 
   // Verify against the REAL cached profile text (headline/employer), NOT Exa's
-  // `summary` — the summary is query-conditioned and echoes the searched company
-  // name into every result, so it falsely "confirms" everyone.
+  // query-conditioned `summary` (which echoes the searched company into every result).
+  // Require a STRONG match: the domain, the full company name, or two adjacent company
+  // words — never a single shared word (which falsely matches look-alike companies).
   const referencesCompany = (haystackRaw: string): boolean => {
     const haystack = normalize(haystackRaw);
-    if (core.length >= 4 && haystack.includes(core)) return true;
-    if (fullName.length >= 5 && haystack.includes(fullName)) return true;
-    return tokens.some(t => haystack.includes(t));
+    if (core.length >= 6 && haystack.includes(core)) return true;
+    if (fullName.length >= 8 && haystack.includes(fullName)) return true;
+    if (bigrams.some(b => b.length >= 8 && haystack.includes(b))) return true;
+    // Single-word company (e.g. "Spotify") — fall back to its one distinctive token.
+    if (words.length === 1 && tokens[0] && haystack.includes(tokens[0])) return true;
+    return false;
   };
   const isLikelyPersonName = (name: string): boolean => {
     const n = (name || "").trim();
@@ -1187,25 +1196,36 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
     let reviewSource: "google" | "exa" | "" = "";
     let placeMeta = "";
 
-    // Step 1: Real Google reviews via the Google Places API. Gated on a key — when
-    // GOOGLE_PLACES_API_KEY is set, this fetches genuine star ratings + review text;
-    // otherwise we skip straight to the Exa fallback below.
+    // Step 1: Real Google reviews via the Places API (New). Gated on a key — when
+    // GOOGLE_PLACES_API_KEY is set, this fetches genuine star ratings + review text
+    // (Text Search -> Place Details); otherwise we skip to the Exa fallback below.
     const googleKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     if (googleKey) {
       try {
-        const q = encodeURIComponent(`${leadName}${city ? ` ${city}` : ""}`);
-        const sr = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?query=${q}&key=${googleKey}`);
-        const search = (await sr.json()) as PlacesSearchResult;
-        const place = (search.results || []).find((p) => p.place_id);
-        if (place?.place_id) {
-          const dr = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,rating,user_ratings_total,reviews&key=${googleKey}`);
-          const details = (await dr.json()) as PlaceDetailsResult;
-          const r = details.result;
-          const reviews = r?.reviews || [];
+        const sr = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": googleKey,
+            "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.userRatingCount",
+          },
+          body: JSON.stringify({ textQuery: `${leadName}${city ? ` ${city}` : ""}` }),
+        });
+        const search: any = await sr.json();
+        const place = (search.places || [])[0];
+        if (place?.id) {
+          const dr = await fetch(`https://places.googleapis.com/v1/places/${place.id}`, {
+            headers: {
+              "X-Goog-Api-Key": googleKey,
+              "X-Goog-FieldMask": "displayName,rating,userRatingCount,reviews",
+            },
+          });
+          const details: any = await dr.json();
+          const reviews: any[] = details.reviews || [];
           if (reviews.length > 0) {
-            placeMeta = `Google rating: ${r.rating ?? "?"}/5 from ${r.user_ratings_total ?? reviews.length} review(s).`;
+            placeMeta = `Google rating: ${details.rating ?? "?"}/5 from ${details.userRatingCount ?? reviews.length} review(s).`;
             reviewTexts = reviews
-              .map((rv) => `Author: ${rv.author_name}\nRating: ${rv.rating}/5\nReview: ${rv.text}`)
+              .map((rv) => `Author: ${rv.authorAttribution?.displayName || "Anonymous"}\nRating: ${rv.rating}/5\nReview: ${rv.text?.text || rv.originalText?.text || ""}`)
               .join("\n\n---\n\n");
             reviewSource = "google";
           }
