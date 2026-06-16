@@ -1334,24 +1334,24 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
     // Step 2: Extract pain points with the LLM. Source-aware: Google reviews are
     // genuine customer feedback (trust them); Exa web results need cautious grounding.
     const analysisPrompt = reviewSource === "google"
-      ? `You are analyzing GENUINE Google customer reviews for "${leadName}"${city ? ` in ${city}` : ""}. ${placeMeta}
-
-These are real reviews customers left on Google:
-${reviewTexts}
-
-Our company offers these products/services:
+      ? `You work in sales for OUR company. We sell:
 ${(sellerProducts || []).join(", ")}
 Our company summary: ${sellerSummary || ""}
 
-A "pain point" is a GENUINE complaint, criticism, or unmet need a customer actually voiced. STRICT RULES:
-- Do NOT turn positive feedback into a pain point. A happy quote is NOT a pain point.
-- Include a pain point only when a review clearly expresses dissatisfaction or a problem, and "evidence" must be the customer's own critical words (a direct quote/paraphrase).
-- If the reviews are overwhelmingly positive with no real complaints, return an EMPTY painPoints array — that is the correct answer. Never invent or infer problems to fill the list.
+You are analyzing GENUINE Google reviews for a PROSPECT we want to sell to — "${leadName}"${city ? ` in ${city}` : ""}. ${placeMeta}
 
-In solutionMapping, connect our products to real OPPORTUNITIES — either solving a genuine pain point above, OR enhancing what guests already value most (e.g. if guests love the pool, our clean-water tech makes it even better). Each talkingPoint must be a specific, credible angle for the sales conversation.
+Reviews:
+${reviewTexts}
 
-For "reviews", include the real reviews with their actual rating and sentiment; set "source" to "Google".
-For "summary": 2-3 honest sentences. If the prospect is well-reviewed, say so plainly, name what guests value most, and frame the opportunity as enhancing strengths — not fixing problems that aren't there.
+Your ONLY job is to find where OUR products are relevant to this prospect. Filter EVERYTHING through the lens of what we sell.
+
+STRICT RULES:
+1. RELEVANCE FIRST. Only consider review content related to OUR offering. IGNORE anything we can't act on with our products (e.g. if we sell pool/water treatment: ignore complaints about navigation, parking, wifi, pricing, booking, or food taste). Unrelated complaints are NOT pain points — leave them out entirely.
+2. A "pain point" must be BOTH (a) a genuine customer complaint AND (b) something our products could plausibly address. If it fails either test, do not include it.
+3. Never invent or infer problems, and never turn a positive quote into a pain point. If there are no RELEVANT complaints, return an EMPTY painPoints array — that is the correct, expected answer.
+4. solutionMapping connects our products to this prospect — POPULATE IT. The "painPoint" field here holds the guest's NEED, priority, or valued strength our product connects to (it does NOT have to be a complaint). You MUST include 2-4 entries whenever the prospect's guests care about anything our products relate to (water quality, pools, hygiene/cleanliness, recovery, wellness, comfort). Example: guests love the pool and recovery programming -> { "painPoint": "Pool & recovery are central to the guest experience", "ourSolution": "Low-chlorine + ozone AOP clean water, plus cold plunge / sauna", "talkingPoint": "..." }. Returning an EMPTY solutionMapping when such a fit clearly exists is WRONG. Leave it empty ONLY if our products have genuinely nothing to do with this prospect. Every entry must be a credible, DIRECT fit — never a stretch, never an unrelated issue (e.g. never map navigation/parking/wifi to a pool product).
+5. For "reviews", include the real reviews with their actual rating and sentiment; set "source" to "Google".
+6. For "summary": 2-3 honest sentences focused only on the angle relevant to US — what guests value (or complain about) that connects to our products, and the opportunity. If the prospect is well-reviewed with nothing for us to fix, say so and frame the opportunity as enhancing the relevant strengths.
 
 Return ONLY valid JSON with this structure:
 {

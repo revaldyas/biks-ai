@@ -605,7 +605,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                               background: "var(--surface)", padding: "10px 14px",
                               borderBottom: "1px solid var(--line)",
                             }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>Their Pain</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-2)" }}>Their Need</span>
                               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Our Solution</span>
                               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sage-strong)" }}>Talking Point</span>
                             </div>
