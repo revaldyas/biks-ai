@@ -128,7 +128,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
       <section style={{ position: "relative", width: "100%", overflow: "hidden", minHeight: isMobile ? 600 : 680, display: "flex", alignItems: "center" }}>
         {/* Background image — smiling still */}
         <img
-          src="/hero-woman.jpg?v=6"
+          src="/hero-woman.jpg?v=7"
           alt=""
           aria-hidden="true"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: isMobile ? "center 32%" : "center 34%" }}
