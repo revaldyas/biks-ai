@@ -1185,6 +1185,24 @@ api.get("/api/poll-task", async (req: Request, res: Response) => {
 // ============================================================
 // POST /api/scrape-reviews — Fetch & analyze Google Reviews of prospect
 // ============================================================
+// In-memory TTL cache for the cost-incurring review lookups (Google Places / Exa).
+// Same company within the TTL = no repeat external call, which keeps Google usage in
+// the free tier. Warm-instance scope (resets on cold start) — fine at this volume.
+type ReviewCacheEntry = { reviewTexts: string; placeMeta: string; source: "google" | "exa" | ""; expires: number };
+const REVIEW_CACHE = new Map<string, ReviewCacheEntry>();
+const REVIEW_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+const reviewKey = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function cacheGetReviews(key: string): ReviewCacheEntry | null {
+  const e = REVIEW_CACHE.get(key);
+  if (!e) return null;
+  if (Date.now() > e.expires) { REVIEW_CACHE.delete(key); return null; }
+  return e;
+}
+function cacheSetReviews(key: string, v: { reviewTexts: string; placeMeta: string; source: "google" | "exa" | "" }) {
+  if (REVIEW_CACHE.size > 500) { const oldest = REVIEW_CACHE.keys().next().value; if (oldest) REVIEW_CACHE.delete(oldest); }
+  REVIEW_CACHE.set(key, { ...v, expires: Date.now() + REVIEW_CACHE_TTL });
+}
+
 api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
   const { leadName, leadUrl, city, sellerProducts, sellerSummary } = req.body;
   if (!leadName) {
@@ -1196,6 +1214,14 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
     let reviewSource: "google" | "exa" | "" = "";
     let placeMeta = "";
 
+    // Serve cached reviews for this company if we've fetched them recently.
+    const cacheKey = `${reviewKey(leadName)}|${reviewKey(city || "")}`;
+    const cachedReviews = cacheGetReviews(cacheKey);
+    if (cachedReviews) {
+      reviewTexts = cachedReviews.reviewTexts;
+      placeMeta = cachedReviews.placeMeta;
+      reviewSource = cachedReviews.source;
+    } else {
     // Step 1: Real Google reviews via the Places API (New). Gated on a key — when
     // GOOGLE_PLACES_API_KEY is set, this fetches genuine star ratings + review text
     // (Text Search -> Place Details); otherwise we skip to the Exa fallback below.
@@ -1270,6 +1296,9 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
         return `Source: ${r.url}\nTitle: ${r.title || ""}\nContent: ${text}\nHighlights: ${highlights}`;
       }).join("\n\n---\n\n");
       if (reviewTexts.trim()) reviewSource = "exa";
+    }
+      // Cache the gathered reviews so a repeat view of this company skips the call.
+      if (reviewTexts.trim()) cacheSetReviews(cacheKey, { reviewTexts, placeMeta, source: reviewSource });
     }
 
     if (!reviewTexts.trim()) {
