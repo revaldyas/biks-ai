@@ -35,3 +35,30 @@ export async function listHistory(): Promise<HistoryRow[]> {
     return [];
   }
 }
+
+// Delete one saved item. Returns true on success. RLS scopes it to the owner.
+export async function deleteHistory(id: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from("histories").delete().eq("id", id);
+    return !error;
+  } catch (e) {
+    console.warn("[history] delete failed", e);
+    return false;
+  }
+}
+
+// Clear all of the signed-in user's saved items (RLS scopes the delete to them).
+export async function clearAllHistory(): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    const uid = sess?.session?.user?.id;
+    if (!uid) return false;
+    const { error } = await supabase.from("histories").delete().eq("user_id", uid);
+    return !error;
+  } catch (e) {
+    console.warn("[history] clear failed", e);
+    return false;
+  }
+}

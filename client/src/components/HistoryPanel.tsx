@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useIsMobile } from "../hooks/useMobile";
-import { listHistory, type HistoryRow, type HistoryKind } from "../lib/history";
+import { listHistory, deleteHistory, type HistoryRow, type HistoryKind } from "../lib/history";
 
 const KIND_LABEL: Record<HistoryKind, string> = {
   analysis: "Company Analysis",
@@ -28,6 +28,22 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
     if (open) { setItems(null); listHistory().then(setItems); }
   }, [open]);
 
+  // Optimistically remove from the list, then delete in the background.
+  const removeItem = (id: string) => {
+    setItems((prev) => (prev ? prev.filter((r) => r.id !== id) : prev));
+    deleteHistory(id);
+  };
+  const clearAll = async () => {
+    if (!window.confirm("Delete all saved history? This can't be undone.")) return;
+    const all = items || [];
+    setItems([]); // optimistic
+    const results = await Promise.all(all.map((r) => deleteHistory(r.id)));
+    if (results.some((ok) => !ok)) {
+      listHistory().then(setItems); // some failed — reflect reality
+      window.alert("Some items couldn't be deleted (check Supabase delete permissions).");
+    }
+  };
+
   if (!open) return null;
 
   // Only surface Company Analysis entries — each is a saved session the user can reopen.
@@ -49,7 +65,14 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: "var(--ink)", margin: 0, letterSpacing: "-0.02em" }}>Your history</h2>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 20, color: "var(--ink-3)", cursor: "pointer", lineHeight: 1 }}>×</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {analyses && analyses.length > 0 && (
+              <button onClick={clearAll} style={{ background: "none", border: "none", fontSize: 12, color: "var(--ink-3)", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                Clear all
+              </button>
+            )}
+            <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 20, color: "var(--ink-3)", cursor: "pointer", lineHeight: 1 }}>×</button>
+          </div>
         </div>
 
         {analyses === null ? (
@@ -63,9 +86,12 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {analyses.map((row) => (
-              <button
+              <div
                 key={row.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => { onOpenItem(row); onClose(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenItem(row); onClose(); } }}
                 style={{
                   textAlign: "left", width: "100%",
                   background: "var(--surface-2)", border: "1px solid var(--line)",
@@ -79,12 +105,24 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
                   <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--sage-strong)" }}>
                     {KIND_LABEL[row.kind] || row.kind}
                   </span>
-                  <span style={{ fontSize: 11, color: "var(--ink-4)" }}>{timeAgo(row.created_at)}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 11, color: "var(--ink-4)" }}>{timeAgo(row.created_at)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeItem(row.id); }}
+                      aria-label="Delete"
+                      title="Delete"
+                      style={{ background: "none", border: "none", color: "var(--ink-4)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--danger, #b4503e)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--ink-4)"; }}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {row.title || "Untitled"}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
