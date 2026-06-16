@@ -113,6 +113,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         body: JSON.stringify({
           leadName: lead.name,
           leadUrl: lead.url,
+          city: lead.city,
           sellerProducts: business.products,
           sellerSummary: business.summary,
         }),

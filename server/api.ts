@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { ENV } from "./_core/env";
 import { manusTask, startManusTask, checkManusTask } from "./_core/manus";
+import { type PlacesSearchResult, type PlaceDetailsResult } from "./_core/map";
 import {
   isSupabaseConfigured,
   verifyRequestUser,
@@ -1176,78 +1177,112 @@ api.get("/api/poll-task", async (req: Request, res: Response) => {
 // POST /api/scrape-reviews — Fetch & analyze Google Reviews of prospect
 // ============================================================
 api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
-  const { leadName, leadUrl, sellerProducts, sellerSummary } = req.body;
+  const { leadName, leadUrl, city, sellerProducts, sellerSummary } = req.body;
   if (!leadName) {
     return res.status(400).json({ error: "leadName is required" });
   }
 
-  const exaKey = process.env.EXA_API_KEY;
-  if (!exaKey) {
-    return res.status(500).json({ error: "Exa not configured" });
-  }
-
   try {
-    // Step 1: Search for Google Reviews of the prospect company via Exa
-    const reviewQueries = [
-      `${leadName} Google reviews`,
-      `${leadName} customer reviews complaints`,
-      `${leadName} review rating feedback`,
-    ];
+    let reviewTexts = "";
+    let reviewSource: "google" | "exa" | "" = "";
+    let placeMeta = "";
 
-    const fetchExa = async (q: string) => {
-      const body: any = {
-        query: q,
-        type: "auto",
-        numResults: 5,
-        contents: {
-          text: { maxCharacters: 3000 },
-          highlights: true,
-          summary: true,
-        },
-      };
-      const r = await fetch("https://api.exa.ai/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": exaKey },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) return [];
-      const d: any = await r.json();
-      return d.results || [];
-    };
-
-    // Run all queries in parallel
-    const allResults = await Promise.all(reviewQueries.map(fetchExa));
-    const merged = allResults.flat();
-
-    // Deduplicate by URL
-    const seen = new Set<string>();
-    const unique: any[] = [];
-    for (const r of merged) {
-      const url = (r.url || "").toLowerCase().replace(/\/$/, "");
-      if (!seen.has(url)) {
-        seen.add(url);
-        unique.push(r);
+    // Step 1: Real Google reviews via the Google Places API. Gated on a key — when
+    // GOOGLE_PLACES_API_KEY is set, this fetches genuine star ratings + review text;
+    // otherwise we skip straight to the Exa fallback below.
+    const googleKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+    if (googleKey) {
+      try {
+        const q = encodeURIComponent(`${leadName}${city ? ` ${city}` : ""}`);
+        const sr = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?query=${q}&key=${googleKey}`);
+        const search = (await sr.json()) as PlacesSearchResult;
+        const place = (search.results || []).find((p) => p.place_id);
+        if (place?.place_id) {
+          const dr = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,rating,user_ratings_total,reviews&key=${googleKey}`);
+          const details = (await dr.json()) as PlaceDetailsResult;
+          const r = details.result;
+          const reviews = r?.reviews || [];
+          if (reviews.length > 0) {
+            placeMeta = `Google rating: ${r.rating ?? "?"}/5 from ${r.user_ratings_total ?? reviews.length} review(s).`;
+            reviewTexts = reviews
+              .map((rv) => `Author: ${rv.author_name}\nRating: ${rv.rating}/5\nReview: ${rv.text}`)
+              .join("\n\n---\n\n");
+            reviewSource = "google";
+          }
+        }
+      } catch (e: any) {
+        console.warn("[scrape-reviews] Google Places lookup failed; falling back to Exa:", e?.message);
       }
     }
 
-    // Extract review content
-    const reviewTexts = unique.slice(0, 8).map((r: any) => {
-      const text = r.text || r.summary || "";
-      const highlights = (r.highlights || []).join(" ");
-      return `Source: ${r.url}\nTitle: ${r.title || ""}\nContent: ${text}\nHighlights: ${highlights}`;
-    }).join("\n\n---\n\n");
+    // Step 1b: Fallback to Exa web-search when the company isn't on Google / has no reviews.
+    if (!reviewTexts.trim() && process.env.EXA_API_KEY) {
+      const exaKey = process.env.EXA_API_KEY;
+      const reviewQueries = [
+        `${leadName} Google reviews`,
+        `${leadName} customer reviews complaints`,
+        `${leadName} review rating feedback`,
+      ];
+      const fetchExa = async (q: string) => {
+        const body: any = {
+          query: q, type: "auto", numResults: 5,
+          contents: { text: { maxCharacters: 3000 }, highlights: true, summary: true },
+        };
+        const r = await fetch("https://api.exa.ai/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": exaKey },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) return [];
+        const d: any = await r.json();
+        return d.results || [];
+      };
+      const allResults = await Promise.all(reviewQueries.map(fetchExa));
+      const seen = new Set<string>();
+      const unique: any[] = [];
+      for (const r of allResults.flat()) {
+        const url = (r.url || "").toLowerCase().replace(/\/$/, "");
+        if (!seen.has(url)) { seen.add(url); unique.push(r); }
+      }
+      reviewTexts = unique.slice(0, 8).map((r: any) => {
+        const text = r.text || r.summary || "";
+        const highlights = (r.highlights || []).join(" ");
+        return `Source: ${r.url}\nTitle: ${r.title || ""}\nContent: ${text}\nHighlights: ${highlights}`;
+      }).join("\n\n---\n\n");
+      if (reviewTexts.trim()) reviewSource = "exa";
+    }
 
     if (!reviewTexts.trim()) {
       return res.json({
         reviews: [],
         painPoints: [],
         solutionMapping: [],
-        summary: "No reviews found for this company.",
+        summary: "No genuine customer reviews found for this company.",
       });
     }
 
-    // Step 2: Use LLM to analyze reviews and extract pain points
-    const analysisPrompt = `You are analyzing customer reviews and feedback about "${leadName}" (${leadUrl || ""}).
+    // Step 2: Extract pain points with the LLM. Source-aware: Google reviews are
+    // genuine customer feedback (trust them); Exa web results need cautious grounding.
+    const analysisPrompt = reviewSource === "google"
+      ? `You are analyzing GENUINE Google customer reviews for "${leadName}"${city ? ` in ${city}` : ""}. ${placeMeta}
+
+These are real reviews customers left on Google:
+${reviewTexts}
+
+Our company offers these products/services:
+${(sellerProducts || []).join(", ")}
+Our company summary: ${sellerSummary || ""}
+
+Extract the prospect's real pain points from these reviews and map them to how our products help. Prioritize negative/critical reviews. Every "evidence" must be a direct quote or close paraphrase from a review above — never invent. Return up to 6 pain points (fewer is fine). Set every review's "source" to "Google".
+
+Return ONLY valid JSON with this structure:
+{
+  "reviews": [{ "text": "the review text", "rating": 1-5, "source": "Google", "sentiment": "negative"|"neutral"|"positive" }],
+  "painPoints": [{ "issue": "short description", "frequency": "common"|"occasional"|"rare", "severity": "high"|"medium"|"low", "evidence": "quote from a review" }],
+  "solutionMapping": [{ "painPoint": "the prospect's pain point", "ourSolution": "how our product solves it", "talkingPoint": "a specific talking point" }],
+  "summary": "2-3 sentence summary of the prospect's main weaknesses we can address"
+}`
+      : `You are analyzing customer reviews and feedback about "${leadName}" (${leadUrl || ""}).
 
 Here is the content found online (may or may not contain real customer reviews):
 ${reviewTexts}
