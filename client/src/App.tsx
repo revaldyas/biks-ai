@@ -8,7 +8,7 @@ import LoginModal from "./components/LoginModal";
 import TrialEndedPage from "./pages/TrialEndedPage";
 import HistoryPanel from "./components/HistoryPanel";
 import { supabase, isSupabaseConfigured, TRIAL_DAYS } from "./lib/supabase";
-import { saveHistory, type HistoryRow } from "./lib/history";
+import { saveHistory, updateHistoryData, type HistoryRow } from "./lib/history";
 
 export interface BusinessProfile {
   companyName: string;
@@ -111,21 +111,36 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
   const [reviewAnalysis, setReviewAnalysis] = useState<ReviewAnalysis | null>(null);
   const [initialCategory, setInitialCategory] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Save the kit to history the moment it's generated (wraps setSalesKit).
-  const handleSetSalesKit = (k: SalesKit | null) => {
-    setSalesKit(k);
-    if (k && business && selectedLead) {
-      saveHistory("kit", selectedLead.name, { business, lead: selectedLead, salesKit: k, contacts });
-    }
-  };
+  // Auto-save the live session (leads, selected lead, brief, kit, reviews) into its
+  // Company Analysis history row, so reopening it later restores all the work — debounced.
+  useEffect(() => {
+    if (!sessionId || !business) return;
+    const snapshot = { business, leads, selectedLead, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached };
+    const t = setTimeout(() => { updateHistoryData(sessionId, snapshot); }, 800);
+    return () => clearTimeout(t);
+  }, [sessionId, business, leads, selectedLead, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached]);
 
-  // Reopen a saved item — restores state and jumps to its step, no Manus re-run.
+  // Reopen a saved item — restores the FULL session and jumps to where you left off,
+  // with no Manus re-run. Keeps editing the same row so further work is saved into it.
   const openHistory = (row: HistoryRow) => {
     const d = row.data || {};
     if (row.kind === "analysis" && d.business) {
-      setBusiness(d.business); setMaxStepReached((p) => Math.max(p, 2)); setStep(2);
+      setBusiness(d.business);
+      setLeads(d.leads || []);
+      setSelectedLead(d.selectedLead || null);
+      setContacts(d.contacts || []);
+      setSalesKit(d.salesKit || null);
+      setReviewAnalysis(d.reviewAnalysis || null);
+      setInitialCategory(d.initialCategory || 0);
+      setSessionId(row.id);
+      // Jump to the furthest step the saved data supports.
+      const furthest = d.selectedLead ? 4 : (d.leads?.length ? 3 : 2);
+      setMaxStepReached(Math.max(d.maxStepReached || 2, furthest));
+      setStep(furthest);
     } else if (row.kind === "leads" && d.business) {
+      // Legacy rows (pre-session model).
       setBusiness(d.business); setLeads(d.leads || []); setMaxStepReached((p) => Math.max(p, 3)); setStep(3);
     } else if (row.kind === "kit" && d.business && d.lead) {
       setBusiness(d.business); setSelectedLead(d.lead); setContacts(d.contacts || []);
@@ -158,6 +173,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
   const handleReset = () => {
     setStep(1);
     setMaxStepReached(1);
+    setSessionId(null);
     setBusiness(null);
     setMemories([]);
     setLeads([]);
@@ -186,7 +202,12 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       )}
       {step === 1 && (
         <HeroStep
-          onComplete={(data) => { setBusiness(data); saveHistory("analysis", data.companyName, { business: data }); goToStep(2); }}
+          onComplete={async (data) => {
+            setBusiness(data);
+            const id = await saveHistory("analysis", data.companyName, { business: data });
+            if (id) setSessionId(id);
+            goToStep(2);
+          }}
           onSignOut={authed ? onSignOut : undefined}
           trialDaysLeft={trialDaysLeft}
           authed={authed}
@@ -211,7 +232,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
           setLeads={setLeads}
           contacts={contacts}
           setContacts={setContacts}
-          onSelectLead={(lead) => { saveHistory("leads", `${lead.category} · ${lead.city}`, { business, leads }); setSelectedLead(lead); setContacts([]); setBrief(null); setSalesKit(null); setReviewAnalysis(null); goToStep(4); }}
+          onSelectLead={(lead) => { setSelectedLead(lead); setContacts([]); setBrief(null); setSalesKit(null); setReviewAnalysis(null); goToStep(4); }}
           onBack={() => setStep(2)}
           initialCategory={initialCategory}
         />
@@ -226,7 +247,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
           contacts={contacts}
           setContacts={setContacts}
           salesKit={salesKit}
-          setSalesKit={handleSetSalesKit}
+          setSalesKit={setSalesKit}
           reviewAnalysis={reviewAnalysis}
           setReviewAnalysis={setReviewAnalysis}
           onBack={() => setStep(3)}

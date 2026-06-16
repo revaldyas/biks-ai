@@ -11,14 +11,27 @@ export interface HistoryRow {
 }
 
 // Save silently — never throw into the UI. No-op when not configured / not signed in.
-export async function saveHistory(kind: HistoryKind, title: string, data: any): Promise<void> {
-  if (!isSupabaseConfigured) return;
+// Returns the new row id so the caller can keep updating this session as it grows.
+export async function saveHistory(kind: HistoryKind, title: string, data: any): Promise<string | null> {
+  if (!isSupabaseConfigured) return null;
   try {
     const { data: sess } = await supabase.auth.getSession();
-    if (!sess?.session) return;
-    await supabase.from("histories").insert({ kind, title, data });
+    if (!sess?.session) return null;
+    const { data: row } = await supabase.from("histories").insert({ kind, title, data }).select("id").single();
+    return (row as { id: string } | null)?.id ?? null;
   } catch (e) {
     console.warn("[history] save failed", e);
+    return null;
+  }
+}
+
+// Update a session's stored snapshot as the user generates leads / brief / kit.
+export async function updateHistoryData(id: string, data: any): Promise<void> {
+  if (!isSupabaseConfigured || !id) return;
+  try {
+    await supabase.from("histories").update({ data }).eq("id", id);
+  } catch (e) {
+    console.warn("[history] update failed", e);
   }
 }
 
