@@ -270,17 +270,24 @@ function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    supabase.auth.getSession().then(async ({ data }: any) => {
-      setSession(data.session);
-      if (data.session?.user) await loadProfile(data.session.user.id);
-      setLoading(false);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e: any, s: any) => {
+    // Safety backstop: never leave the user stuck on the loading spinner if the
+    // auth check stalls (e.g. a slow token refresh or profile fetch).
+    const safety = setTimeout(() => setLoading(false), 4000);
+    supabase.auth.getSession()
+      .then(({ data }: any) => {
+        setSession(data.session);
+        setLoading(false); // render as soon as the session is known
+        // Load the trial/plan profile in the background — don't block first render on it.
+        if (data.session?.user) loadProfile(data.session.user.id);
+      })
+      .catch((e: any) => { console.error("getSession failed", e); setLoading(false); })
+      .finally(() => clearTimeout(safety));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e: any, s: any) => {
       setSession(s);
-      if (s?.user) { await loadProfile(s.user.id); setShowLogin(false); } // close modal on login
+      if (s?.user) { loadProfile(s.user.id); setShowLogin(false); } // close modal on login
       else { setTrialDaysLeft(null); setPlan("trial"); }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { clearTimeout(safety); sub.subscription.unsubscribe(); };
   }, []);
 
   const signOut = async () => { await supabase.auth.signOut(); };
