@@ -1239,7 +1239,13 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
         });
         const search: any = await sr.json();
         const place = (search.places || [])[0];
-        if (place?.id) {
+        // Guard: only trust the match if Google's business name shares a distinctive
+        // word with the prospect — avoids pulling a same-city, different-business listing.
+        const placeName = reviewKey(place?.displayName?.text || "");
+        const prospectName = reviewKey(leadName);
+        const pTokens = String(leadName || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+        const nameOk = !!placeName && (pTokens.some((t) => placeName.includes(t)) || prospectName.includes(placeName) || placeName.includes(prospectName));
+        if (place?.id && nameOk) {
           const dr = await fetch(`https://places.googleapis.com/v1/places/${place.id}`, {
             headers: {
               "X-Goog-Api-Key": googleKey,
