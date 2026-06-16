@@ -629,8 +629,20 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {/* Review Snippets */}
                       {reviewAnalysis.reviews.length > 0 && (
                         <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
-                            CUSTOMER REVIEWS
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+                              CUSTOMER REVIEWS
+                            </div>
+                            {reviewAnalysis.reviews[0]?.source?.includes("google") && (
+                              <a
+                                href={reviewAnalysis.reviews[0].source}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ fontSize: 11, fontWeight: 600, color: "var(--sage-strong)", textDecoration: "none" }}
+                              >
+                                View on Google ↗
+                              </a>
+                            )}
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
                             {reviewAnalysis.reviews
