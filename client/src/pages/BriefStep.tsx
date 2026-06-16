@@ -542,6 +542,15 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                     </div>
                   ) : reviewAnalysis && (reviewAnalysis.painPoints.length > 0 || reviewAnalysis.reviews.length > 0 || reviewAnalysis.solutionMapping.length > 0) ? (
                     <div>
+                      {/* Filter lens — the keywords we judged review relevance against */}
+                      {reviewAnalysis.relevanceKeywords && reviewAnalysis.relevanceKeywords.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-3)", marginRight: 2 }}>Filtered for</span>
+                          {reviewAnalysis.relevanceKeywords.map((k, i) => (
+                            <span key={i} style={{ fontSize: 11, color: "var(--sage-strong)", background: "var(--sage-wash)", border: "1px solid var(--line)", borderRadius: 999, padding: "2px 9px" }}>{k}</span>
+                          ))}
+                        </div>
+                      )}
                       {/* Summary */}
                       {reviewAnalysis.summary && (
                         <div style={{

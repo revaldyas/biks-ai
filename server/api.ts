@@ -1351,14 +1351,16 @@ STRICT RULES:
 3. Never invent or infer problems, and never turn a positive quote into a pain point. If there are no RELEVANT complaints, return an EMPTY painPoints array — that is the correct, expected answer.
 4. solutionMapping connects our products to this prospect — POPULATE IT. The "painPoint" field here holds the guest's NEED, priority, or valued strength our product connects to (it does NOT have to be a complaint). You MUST include 2-4 entries whenever the prospect's guests care about anything our products relate to (water quality, pools, hygiene/cleanliness, recovery, wellness, comfort). Example: guests love the pool and recovery programming -> { "painPoint": "Pool & recovery are central to the guest experience", "ourSolution": "Low-chlorine + ozone AOP clean water, plus cold plunge / sauna", "talkingPoint": "..." }. Returning an EMPTY solutionMapping when such a fit clearly exists is WRONG. Leave it empty ONLY if our products have genuinely nothing to do with this prospect. Every entry must be a credible, DIRECT fit — never a stretch, never an unrelated issue (e.g. never map navigation/parking/wifi to a pool product).
 5. For "reviews", include the real reviews with their actual rating and sentiment; set "source" to "Google".
-6. For "summary": 2-3 honest sentences focused only on the angle relevant to US — what guests value (or complain about) that connects to our products, and the opportunity. If the prospect is well-reviewed with nothing for us to fix, say so and frame the opportunity as enhancing the relevant strengths.
+6. For "summary": keep it SHORT — ONE sentence, two at most, no long paragraphs. If there are no product-relevant complaints, say that plainly FIRST (e.g. "No product-relevant complaints found.") then one short opportunity note.
+7. For "relevanceKeywords": list 4-8 specific keywords/topics from OUR products & value prop that you used to judge what counts as relevant in these reviews (e.g. "pool", "water quality", "chlorine", "recovery", "sauna", "hygiene"). This is the lens we filtered the reviews through.
 
 Return ONLY valid JSON with this structure:
 {
   "reviews": [{ "text": "the review text", "rating": 1-5, "source": "Google", "sentiment": "negative"|"neutral"|"positive" }],
   "painPoints": [{ "issue": "short description", "frequency": "common"|"occasional"|"rare", "severity": "high"|"medium"|"low", "evidence": "quote from a review" }],
-  "solutionMapping": [{ "painPoint": "the prospect's pain point", "ourSolution": "how our product solves it", "talkingPoint": "a specific talking point" }],
-  "summary": "2-3 sentence summary of the prospect's main weaknesses we can address"
+  "solutionMapping": [{ "painPoint": "the prospect's need or valued strength", "ourSolution": "how our product fits", "talkingPoint": "a specific talking point" }],
+  "relevanceKeywords": ["pool", "water quality", "recovery"],
+  "summary": "ONE short sentence (two max)"
 }`
       : `You are analyzing customer reviews and feedback about "${leadName}" (${leadUrl || ""}).
 
@@ -1401,10 +1403,11 @@ Return ONLY valid JSON with this structure:
       "talkingPoint": "A specific talking point for the sales conversation"
     }
   ],
-  "summary": "2-3 sentence summary of the prospect's main weaknesses/pain points that we can address"
+  "relevanceKeywords": ["product-relevant topics from our offering used to judge relevance"],
+  "summary": "ONE short sentence (two max). If no genuine reviews, say so plainly."
 }
 
-Prioritize NEGATIVE reviews and complaints when genuine customer feedback exists. Extract up to 6 pain points — but ONLY those backed by real customer feedback in the content. It is correct and expected to return fewer (or zero) when the content has no genuine reviews. Never pad the list with invented or inferred problems.`;
+Prioritize NEGATIVE reviews and complaints when genuine customer feedback exists. Extract up to 6 pain points — but ONLY those backed by real customer feedback in the content. It is correct and expected to return fewer (or zero) when the content has no genuine reviews. Never pad the list with invented or inferred problems. For "relevanceKeywords", list the keywords/topics from OUR products you used to judge relevance.`;
 
     const taskId = await startManusTask(analysisPrompt, {
       type: "object",
@@ -1450,9 +1453,10 @@ Prioritize NEGATIVE reviews and complaints when genuine customer feedback exists
             additionalProperties: false,
           },
         },
+        relevanceKeywords: { type: "array", items: { type: "string" } },
         summary: { type: "string" },
       },
-      required: ["reviews", "painPoints", "solutionMapping", "summary"],
+      required: ["reviews", "painPoints", "solutionMapping", "relevanceKeywords", "summary"],
       additionalProperties: false,
     });
     // Return the real Google reviews alongside the task so the UI can show them

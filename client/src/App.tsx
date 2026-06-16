@@ -95,6 +95,7 @@ export interface ReviewAnalysis {
   reviews: { text: string; rating: number; source: string; sentiment: string }[];
   painPoints: { issue: string; frequency: string; severity: string; evidence: string }[];
   solutionMapping: { painPoint: string; ourSolution: string; talkingPoint: string }[];
+  relevanceKeywords?: string[];
   summary: string;
 }
 
