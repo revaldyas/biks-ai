@@ -150,6 +150,10 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
+// NOTE: vitePluginManusRuntime() also injects the app's Tailwind utility CSS at
+// runtime (index.css does not `@import "tailwindcss"`), so it must stay in prod or
+// every className-styled component renders unstyled. Removing it for the ~335KB
+// index.html win requires first moving Tailwind into the CSS bundle.
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
 
 export default defineConfig({
