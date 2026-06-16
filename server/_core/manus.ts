@@ -9,6 +9,11 @@
 
 const BASE = "https://api.manus.ai/v2";
 
+// Agent profile controls speed vs depth. "manus-1.6-lite" is the fast profile —
+// right for these structured one-shot generations (brief, kit, review analysis).
+// Override with MANUS_AGENT_PROFILE ("manus-1.6" / "manus-1.6-max") for more depth.
+const AGENT_PROFILE = process.env.MANUS_AGENT_PROFILE || "manus-1.6-lite";
+
 function extractJson(text: string): unknown {
   // Strip markdown code fences
   const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -55,6 +60,7 @@ export async function manusTask<T>(
   const createBody = JSON.stringify({
     message: { content: prompt },
     structured_output_schema: schema,
+    agent_profile: AGENT_PROFILE,
   });
   let created: any = null;
   let lastErr = "task.create error";
@@ -177,7 +183,7 @@ export async function startManusTask(
   const createRes = await fetch(`${BASE}/task.create`, {
     method: "POST",
     headers: hdrs,
-    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema }),
+    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema, agent_profile: AGENT_PROFILE }),
   });
 
   if (!createRes.ok) {
