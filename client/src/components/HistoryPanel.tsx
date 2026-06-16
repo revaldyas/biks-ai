@@ -30,6 +30,9 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
 
   if (!open) return null;
 
+  // Only surface Company Analysis entries — each is a saved session the user can reopen.
+  const analyses = items === null ? null : items.filter((r) => r.kind === "analysis");
+
   return (
     <div
       onClick={onClose}
@@ -49,17 +52,17 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 20, color: "var(--ink-3)", cursor: "pointer", lineHeight: 1 }}>×</button>
         </div>
 
-        {items === null ? (
+        {analyses === null ? (
           <div style={{ textAlign: "center", paddingTop: 40 }}>
             <div style={{ display: "inline-block", width: 18, height: 18, border: "2px solid var(--line-strong)", borderTopColor: "var(--sage)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
           </div>
-        ) : items.length === 0 ? (
+        ) : analyses.length === 0 ? (
           <p style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.6, marginTop: 8 }}>
-            Nothing saved yet. Analyze a website, find leads, or generate a marketing kit and it'll show up here.
+            Nothing saved yet. Analyze a website and it'll show up here — reopen it anytime to pick up where you left off.
           </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {items.map((row) => (
+            {analyses.map((row) => (
               <button
                 key={row.id}
                 onClick={() => { onOpenItem(row); onClose(); }}
