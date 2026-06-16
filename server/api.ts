@@ -1328,7 +1328,15 @@ Our company offers these products/services:
 ${(sellerProducts || []).join(", ")}
 Our company summary: ${sellerSummary || ""}
 
-Extract the prospect's real pain points from these reviews and map them to how our products help. Prioritize negative/critical reviews. Every "evidence" must be a direct quote or close paraphrase from a review above — never invent. Return up to 6 pain points (fewer is fine). Set every review's "source" to "Google".
+A "pain point" is a GENUINE complaint, criticism, or unmet need a customer actually voiced. STRICT RULES:
+- Do NOT turn positive feedback into a pain point. A happy quote is NOT a pain point.
+- Include a pain point only when a review clearly expresses dissatisfaction or a problem, and "evidence" must be the customer's own critical words (a direct quote/paraphrase).
+- If the reviews are overwhelmingly positive with no real complaints, return an EMPTY painPoints array — that is the correct answer. Never invent or infer problems to fill the list.
+
+In solutionMapping, connect our products to real OPPORTUNITIES — either solving a genuine pain point above, OR enhancing what guests already value most (e.g. if guests love the pool, our clean-water tech makes it even better). Each talkingPoint must be a specific, credible angle for the sales conversation.
+
+For "reviews", include the real reviews with their actual rating and sentiment; set "source" to "Google".
+For "summary": 2-3 honest sentences. If the prospect is well-reviewed, say so plainly, name what guests value most, and frame the opportunity as enhancing strengths — not fixing problems that aren't there.
 
 Return ONLY valid JSON with this structure:
 {
