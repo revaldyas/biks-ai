@@ -133,13 +133,13 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
         {/* Background video */}
         <video
           autoPlay={!reduceMotion} muted loop playsInline preload="metadata"
-          poster="/hero-woman-poster.jpg?v=2"
+          poster="/hero-woman-poster.jpg?v=3"
           aria-hidden="true"
           disablePictureInPicture
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: isMobile ? "center 32%" : "center 34%" }}
         >
-          <source src="/hero-woman.webm?v=2" type="video/webm" />
-          <source src="/hero-woman.mp4?v=2" type="video/mp4" />
+          <source src="/hero-woman.webm?v=3" type="video/webm" />
+          <source src="/hero-woman.mp4?v=3" type="video/mp4" />
         </video>
 
         {/* Parchment legibility overlay — keeps the left copy readable, lets her show on the right */}
@@ -495,13 +495,16 @@ function RotatingHero({ isMobile }: { isMobile: boolean }) {
       <span style={{ display: "block", fontSize: big, fontWeight: 600, color: "var(--ink)", letterSpacing: "-0.02em", lineHeight: 1.05 }}>
         For business owners who
       </span>
-      {/* Rotating clause — only this changes; reserve two lines so layout never jumps */}
-      <span style={{ display: "block", minHeight: isMobile ? "2.3em" : "2.4em", overflow: "hidden" }}>
+      {/* Rotating clause — FIXED two-line box. Height is in `em` relative to the
+          headline font (fontSize set here), so it always reserves exactly two lines
+          regardless of phrase length. The title above and everything below never move;
+          only this text changes. */}
+      <span style={{ display: "block", fontSize: big, height: "2.2em", overflow: "hidden" }}>
         <span
           key={i}
           style={{
             display: "inline-block", fontSize: big, fontWeight: 600, color: "var(--sage-strong)",
-            letterSpacing: "-0.02em", lineHeight: 1.1, animation: "rise 0.5s ease both",
+            letterSpacing: "-0.02em", lineHeight: 1.1, opacity: 1, animation: "rise 0.5s ease both",
           }}
         >
           {PAINS[i]}
