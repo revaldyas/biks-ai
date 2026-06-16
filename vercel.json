@@ -1,6 +1,16 @@
 {
   "buildCommand": "vite build && esbuild api/index.ts --platform=node --target=node20 --bundle --format=esm --packages=external --outfile=api/handler.js",
   "outputDirectory": "dist/public",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/(.*)\\.(jpg|jpeg|png|webp|avif|svg|mp4|webm)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }]
+    }
+  ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/handler" },
     { "source": "/(.*)", "destination": "/index.html" }

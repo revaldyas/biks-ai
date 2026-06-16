@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import type { BusinessProfile } from "../App";
 import { useIsMobile } from "../hooks/useMobile";
 import Reveal from "../components/Reveal";
@@ -19,6 +19,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
   const [error, setError] = useState("");
+  const [urlFocused, setUrlFocused] = useState(false);
 
   const handleAnalyze = async () => {
     if (!url.trim()) return;
@@ -82,7 +83,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
       background: "var(--bg)",
     }}>
       {/* Navbar */}
-      <div style={{ padding: isMobile ? "18px 16px" : "28px 36px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      <header style={{ padding: isMobile ? "18px 16px" : "28px 36px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 17, color: "var(--ink)", letterSpacing: "-0.01em" }}>
             Biks.ai
@@ -122,8 +123,9 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
             </button>
           )}
         </div>
-      </div>
+      </header>
 
+      <main>
       {/* Hero — full-bleed image with parchment overlay */}
       <section style={{ position: "relative", width: "100%", overflow: "hidden", minHeight: isMobile ? 600 : 680, display: "flex", alignItems: "center" }}>
         {/* Background image — smiling still */}
@@ -131,6 +133,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
           src="/hero-woman.jpg?v=7"
           alt=""
           aria-hidden="true"
+          fetchPriority="high"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: isMobile ? "center 32%" : "center 34%" }}
         />
 
@@ -160,19 +163,25 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleAnalyze(); }}
+                onFocus={() => setUrlFocused(true)}
+                onBlur={() => setUrlFocused(false)}
                 placeholder="Enter your website URL"
+                aria-label="Your website URL"
+                type="url"
+                inputMode="url"
+                autoComplete="url"
                 disabled={loading}
                 style={{
                   width: "100%",
                   background: "var(--surface-2)",
-                  border: "1px solid var(--line)",
+                  border: `1px solid ${urlFocused ? "var(--sage-strong)" : "var(--line)"}`,
                   borderRadius: "var(--radius-md)",
                   padding: isMobile ? "16px 110px 16px 16px" : "16px 120px 16px 18px",
                   fontSize: 16,
                   color: "var(--ink)",
                   outline: "none",
                   fontFamily: "var(--font-sans)",
-                  boxShadow: "var(--shadow-2)",
+                  boxShadow: urlFocused ? "var(--ring)" : "var(--shadow-2)",
                 }}
               />
               <button
@@ -260,7 +269,7 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
           {[
             { n: "01", label: "Analyze", title: "Understand your business", desc: "Biks reads your website and builds a sharp profile — what you sell, who buys, and three adjacent markets to expand into." },
             { n: "02", label: "Find leads", title: "Surface real prospects", desc: "In-market companies in your chosen city, each with a relevance read and verified decision-makers — no guessed names." },
-            { n: "03", label: "Marketing kit", title: "Send the right message", desc: "A personalized outreach email and angle for each prospect, grounded in their actual site and pain points." },
+            { n: "03", label: "Draft outreach", title: "Send the right message", desc: "A personalized outreach email and angle for each prospect, grounded in their actual site and pain points." },
           ].map(s => (
             <div key={s.n} style={{
               background: "var(--surface)", border: "1px solid var(--line)",
@@ -389,17 +398,33 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
       </div>
 
       </Reveal>
+      </main>
 
       {/* Footer */}
-      <div style={{
-        textAlign: "center",
-        padding: "40px 16px 28px",
-        fontSize: 12,
-        color: "var(--ink-3)",
-        fontFamily: "var(--font-sans)",
-      }}>
-        Powered by Manus, Exa and Mem0
-      </div>
+      <footer style={{ width: "100%", borderTop: "1px solid var(--line)", marginTop: isMobile ? 32 : 48, background: "var(--surface)" }}>
+        <div style={{ maxWidth: 1040, margin: "0 auto", padding: isMobile ? "32px 16px 28px" : "40px 24px 32px", textAlign: "center" }}>
+          <div style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 18, color: "var(--ink)", letterSpacing: "-0.01em" }}>
+            Biks.ai
+          </div>
+          <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "8px 0 18px", fontFamily: "var(--font-sans)" }}>
+            Your AI sales agent — turn your website into a pipeline of real leads.
+          </p>
+          <nav aria-label="Footer" style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 18, marginBottom: 18 }}>
+            {[
+              { label: "Privacy", href: "/privacy" },
+              { label: "Terms", href: "/terms" },
+              { label: "Contact", href: "mailto:hello@biks.ai" },
+            ].map(l => (
+              <a key={l.label} href={l.href} style={{ fontSize: 13, color: "var(--ink-2)", textDecoration: "none", fontFamily: "var(--font-sans)" }}>
+                {l.label}
+              </a>
+            ))}
+          </nav>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", fontFamily: "var(--font-sans)" }}>
+            © {new Date().getFullYear()} Biks.ai · Built with Manus, Exa &amp; Mem0
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -409,8 +434,8 @@ const PAINS = [
   "need more leads",
   "want to grow faster",
   "are tired of cold lists",
-  "have run out of customers",
-  "want warmer outreach",
+  "want to reach new markets",
+  "want outreach that lands",
 ];
 
 // The five Biks capabilities, in pipeline order. Rendered as a horizontal
@@ -498,21 +523,30 @@ function CapabilityFlow({ isMobile }: { isMobile: boolean }) {
 function RotatingHero({ isMobile }: { isMobile: boolean }) {
   const [i, setI] = useState(0);
   useEffect(() => {
+    // Respect reduced-motion: don't auto-rotate (WCAG 2.2.2) — show a single static clause.
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const id = setInterval(() => setI(p => (p + 1) % PAINS.length), 1600);
     return () => clearInterval(id);
   }, []);
   const big = isMobile ? "30px" : "clamp(36px, 5.5vw, 60px)";
+  const srOnly: CSSProperties = {
+    position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
+    overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0,
+  };
   return (
     <h1 style={{ margin: "0 0 16px", maxWidth: 900 }}>
       {/* Fixed line — never moves */}
       <span style={{ display: "block", fontSize: big, fontWeight: 600, color: "var(--ink)", letterSpacing: "-0.02em", lineHeight: 1.05 }}>
         For business owners who
       </span>
+      {/* Stable accessible name for screen readers (the rotating visual is hidden from AT
+          so it isn't re-announced every 1.6s). */}
+      <span style={srOnly}>need more leads, want to grow faster, or want outreach that lands.</span>
       {/* Rotating clause — FIXED two-line box. Height is in `em` relative to the
           headline font (fontSize set here), so it always reserves exactly two lines
           regardless of phrase length. The title above and everything below never move;
-          only this text changes. */}
-      <span style={{ display: "block", fontSize: big, height: "2.2em", overflow: "hidden" }}>
+          only this text changes. aria-hidden: decorative rotation, not for AT. */}
+      <span aria-hidden="true" style={{ display: "block", fontSize: big, height: "2.2em", overflow: "hidden" }}>
         <span
           key={i}
           style={{
