@@ -192,9 +192,30 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
               </button>
             </div>
 
-            <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12, fontFamily: "var(--font-sans)" }}>
-              Start free · 7-day trial · no card required
-            </p>
+            {/* Public landing: trial reminder. Signed-in: a short how-to guide for the box. */}
+            {!authed && (
+              <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 12, fontFamily: "var(--font-sans)" }}>
+                Start free · 7-day trial · no card required
+              </p>
+            )}
+            {authed && !loading && (
+              <div style={{
+                maxWidth: 460, width: "100%", marginTop: 14, textAlign: "left",
+                background: "var(--surface)", border: "1px solid var(--line)",
+                borderRadius: "var(--radius-md)", padding: "14px 16px", boxShadow: "var(--shadow-1)",
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--sage-strong)", marginBottom: 9 }}>
+                  How to start
+                </div>
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.65 }}>
+                  <li>Paste your homepage URL in the box above — e.g.{" "}
+                    <span style={{ fontWeight: 600, color: "var(--ink)" }}>yourcompany.com</span>{" "}
+                    (no <span style={{ fontFamily: "var(--font-mono)" }}>https://</span> needed).</li>
+                  <li>Press <span style={{ fontWeight: 600, color: "var(--ink)" }}>Analyze</span> — Biks reads your site.</li>
+                  <li>Get your markets, leads, and outreach in ~2 minutes.</li>
+                </ol>
+              </div>
+            )}
 
 
             {/* Progress */}
