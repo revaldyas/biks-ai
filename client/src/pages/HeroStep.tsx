@@ -19,10 +19,6 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ pct: 0, message: "", detail: "" });
   const [error, setError] = useState("");
-  const [reduceMotion, setReduceMotion] = useState(false);
-  useEffect(() => {
-    setReduceMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
-  }, []);
 
   const handleAnalyze = async () => {
     if (!url.trim()) return;
@@ -128,19 +124,15 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
         </div>
       </div>
 
-      {/* Hero — full-bleed video with parchment overlay + floating capability chips */}
+      {/* Hero — full-bleed image with parchment overlay */}
       <section style={{ position: "relative", width: "100%", overflow: "hidden", minHeight: isMobile ? 600 : 680, display: "flex", alignItems: "center" }}>
-        {/* Background video */}
-        <video
-          autoPlay={!reduceMotion} muted loop playsInline preload="metadata"
-          poster="/hero-woman-poster.jpg?v=5"
+        {/* Background image — smiling still */}
+        <img
+          src="/hero-woman.jpg?v=6"
+          alt=""
           aria-hidden="true"
-          disablePictureInPicture
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: isMobile ? "center 32%" : "center 34%" }}
-        >
-          <source src="/hero-woman.webm?v=5" type="video/webm" />
-          <source src="/hero-woman.mp4?v=5" type="video/mp4" />
-        </video>
+        />
 
         {/* Parchment legibility overlay — keeps the left copy readable, lets her show on the right */}
         <div style={{
