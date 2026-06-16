@@ -251,9 +251,6 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
         </div>
       </section>
 
-      {/* Capability flow — the five steps, below the video */}
-      <CapabilityFlow isMobile={isMobile} />
-
       {/* How it works */}
       <Reveal>
       <div style={{ width: "100%", maxWidth: 1040, margin: "0 auto", padding: isMobile ? "28px 16px 8px" : "56px 24px 24px" }}>
@@ -437,88 +434,6 @@ const PAINS = [
   "want to reach new markets",
   "want outreach that lands",
 ];
-
-// The five Biks capabilities, in pipeline order. Rendered as a horizontal
-// flow bar directly below the hero video (desktop) / a clean numbered list (mobile).
-const HERO_STEPS = [
-  { label: "Analyze your website" },
-  { label: "Discover new markets" },
-  { label: "Find real leads" },
-  { label: "Verify decision-makers" },
-  { label: "Draft outreach" },
-];
-
-function BadgeNum({ n }: { n: number }) {
-  return (
-    <span style={{
-      flexShrink: 0,
-      width: 26, height: 26, borderRadius: "50%",
-      background: "var(--sage-wash)", color: "var(--sage-strong)",
-      border: "1px solid var(--line)",
-      display: "inline-flex", alignItems: "center", justifyContent: "center",
-      fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)",
-    }}>
-      {String(n).padStart(2, "0")}
-    </span>
-  );
-}
-
-// The capability "flow bar" — sits under the hero, not over the video.
-// Desktop: one horizontal strip of numbered steps joined by arrows.
-// Mobile: a tidy numbered list.
-function CapabilityFlow({ isMobile }: { isMobile: boolean }) {
-  const labelStyle = {
-    fontSize: isMobile ? 13 : 12, fontWeight: 700, fontFamily: "var(--font-mono)",
-    letterSpacing: "0.04em", textTransform: "uppercase" as const, color: "var(--ink-2)",
-    whiteSpace: "nowrap" as const,
-  };
-
-  if (isMobile) {
-    return (
-      <Reveal>
-        <div style={{ width: "100%", maxWidth: 460, margin: "0 auto", padding: "20px 16px 4px" }}>
-          <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-xl)", overflow: "hidden" }}>
-            {HERO_STEPS.map((s, i) => (
-              <div key={s.label} style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "13px 16px",
-                borderBottom: i === HERO_STEPS.length - 1 ? "none" : "1px solid var(--line)",
-              }}>
-                <BadgeNum n={i + 1} />
-                <span style={labelStyle}>{s.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Reveal>
-    );
-  }
-
-  // Desktop: a horizontal stepper — five equal columns, each a numbered badge
-  // over a centered label, joined by a connector line. Always one tidy row.
-  return (
-    <Reveal>
-      <div style={{ width: "100%", maxWidth: 1040, margin: "0 auto", padding: "40px 24px 8px" }}>
-        <div style={{
-          display: "flex", alignItems: "flex-start",
-          background: "var(--surface)", border: "1px solid var(--line)",
-          borderRadius: "var(--radius-xl)", padding: "22px 24px", boxShadow: "var(--shadow-1)",
-        }}>
-          {HERO_STEPS.map((s, i) => (
-            <div key={s.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-              {/* badge + connector line */}
-              <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
-                <span style={{ flex: 1, height: 1.5, background: i === 0 ? "transparent" : "var(--line-strong)" }} />
-                <BadgeNum n={i + 1} />
-                <span style={{ flex: 1, height: 1.5, background: i === HERO_STEPS.length - 1 ? "transparent" : "var(--line-strong)" }} />
-              </div>
-              <span style={{ ...labelStyle, marginTop: 12, whiteSpace: "normal", maxWidth: 130, lineHeight: 1.35 }}>{s.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Reveal>
-  );
-}
 
 function RotatingHero({ isMobile }: { isMobile: boolean }) {
   const [i, setI] = useState(0);
