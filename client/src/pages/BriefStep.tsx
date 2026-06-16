@@ -125,6 +125,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         return;
       }
       const { taskId } = data;
+      const realReviews = data.googleReviews || []; // genuine Google reviews to display
       const startTime = Date.now();
       while (true) {
         if (Date.now() - startTime > 120_000) {
@@ -135,7 +136,10 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         const pollRes = await apiFetch(`/api/poll-task?id=${taskId}`);
         const status = await pollRes.json();
         if (status.status === "done") {
-          setReviewAnalysis(status.result as ReviewAnalysis);
+          const result = status.result as ReviewAnalysis;
+          // Show the real Google reviews, not the LLM's reinterpretation.
+          if (realReviews.length > 0) result.reviews = realReviews;
+          setReviewAnalysis(result);
           break;
         }
         if (status.status === "error") {
@@ -536,7 +540,7 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                         margin: "0 auto",
                       }} />
                     </div>
-                  ) : reviewAnalysis && reviewAnalysis.painPoints.length > 0 ? (
+                  ) : reviewAnalysis && (reviewAnalysis.painPoints.length > 0 || reviewAnalysis.reviews.length > 0 || reviewAnalysis.solutionMapping.length > 0) ? (
                     <div>
                       {/* Summary */}
                       {reviewAnalysis.summary && (
@@ -626,12 +630,12 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
                       {reviewAnalysis.reviews.length > 0 && (
                         <div>
                           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
-                            REVIEW SNIPPETS
+                            CUSTOMER REVIEWS
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
                             {reviewAnalysis.reviews
                         .sort((a, b) => (a.sentiment === "negative" ? -1 : 1) - (b.sentiment === "negative" ? -1 : 1))
-                        .slice(0, 4).map((rev, i) => (
+                        .slice(0, 6).map((rev, i) => (
                               <div key={i} style={{
                                 background: "var(--surface)", border: "1px solid var(--line)",
                                 borderRadius: "var(--radius-md)", padding: "12px 14px",

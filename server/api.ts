@@ -1188,7 +1188,7 @@ api.get("/api/poll-task", async (req: Request, res: Response) => {
 // In-memory TTL cache for the cost-incurring review lookups (Google Places / Exa).
 // Same company within the TTL = no repeat external call, which keeps Google usage in
 // the free tier. Warm-instance scope (resets on cold start) — fine at this volume.
-type ReviewCacheEntry = { reviewTexts: string; placeMeta: string; source: "google" | "exa" | ""; expires: number };
+type ReviewCacheEntry = { reviewTexts: string; placeMeta: string; source: "google" | "exa" | ""; googleReviews: any[]; expires: number };
 const REVIEW_CACHE = new Map<string, ReviewCacheEntry>();
 const REVIEW_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 const reviewKey = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1198,7 +1198,7 @@ function cacheGetReviews(key: string): ReviewCacheEntry | null {
   if (Date.now() > e.expires) { REVIEW_CACHE.delete(key); return null; }
   return e;
 }
-function cacheSetReviews(key: string, v: { reviewTexts: string; placeMeta: string; source: "google" | "exa" | "" }) {
+function cacheSetReviews(key: string, v: { reviewTexts: string; placeMeta: string; source: "google" | "exa" | ""; googleReviews: any[] }) {
   if (REVIEW_CACHE.size > 500) { const oldest = REVIEW_CACHE.keys().next().value; if (oldest) REVIEW_CACHE.delete(oldest); }
   REVIEW_CACHE.set(key, { ...v, expires: Date.now() + REVIEW_CACHE_TTL });
 }
@@ -1213,6 +1213,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
     let reviewTexts = "";
     let reviewSource: "google" | "exa" | "" = "";
     let placeMeta = "";
+    let googleReviews: any[] = []; // structured reviews for the UI (real Google data)
 
     // Serve cached reviews for this company if we've fetched them recently.
     const cacheKey = `${reviewKey(leadName)}|${reviewKey(city || "")}`;
@@ -1221,6 +1222,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
       reviewTexts = cachedReviews.reviewTexts;
       placeMeta = cachedReviews.placeMeta;
       reviewSource = cachedReviews.source;
+      googleReviews = cachedReviews.googleReviews || [];
     } else {
     // Step 1: Real Google reviews via the Places API (New). Gated on a key — when
     // GOOGLE_PLACES_API_KEY is set, this fetches genuine star ratings + review text
@@ -1249,7 +1251,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
           const dr = await fetch(`https://places.googleapis.com/v1/places/${place.id}`, {
             headers: {
               "X-Goog-Api-Key": googleKey,
-              "X-Goog-FieldMask": "displayName,rating,userRatingCount,reviews",
+              "X-Goog-FieldMask": "displayName,rating,userRatingCount,reviews,googleMapsUri",
             },
           });
           const details: any = await dr.json();
@@ -1259,6 +1261,19 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
             reviewTexts = reviews
               .map((rv) => `Author: ${rv.authorAttribution?.displayName || "Anonymous"}\nRating: ${rv.rating}/5\nReview: ${rv.text?.text || rv.originalText?.text || ""}`)
               .join("\n\n---\n\n");
+            // Structured reviews for the UI to display directly (the real Google data,
+            // not the LLM's reinterpretation).
+            const mapsUri = details.googleMapsUri || "";
+            googleReviews = reviews.map((rv) => {
+              const rating = rv.rating || 0;
+              return {
+                author: rv.authorAttribution?.displayName || "Anonymous",
+                text: rv.text?.text || rv.originalText?.text || "",
+                rating,
+                source: mapsUri,
+                sentiment: rating >= 4 ? "positive" : rating === 3 ? "neutral" : "negative",
+              };
+            });
             reviewSource = "google";
           }
         }
@@ -1304,7 +1319,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
       if (reviewTexts.trim()) reviewSource = "exa";
     }
       // Cache the gathered reviews so a repeat view of this company skips the call.
-      if (reviewTexts.trim()) cacheSetReviews(cacheKey, { reviewTexts, placeMeta, source: reviewSource });
+      if (reviewTexts.trim()) cacheSetReviews(cacheKey, { reviewTexts, placeMeta, source: reviewSource, googleReviews });
     }
 
     if (!reviewTexts.trim()) {
@@ -1440,7 +1455,9 @@ Prioritize NEGATIVE reviews and complaints when genuine customer feedback exists
       required: ["reviews", "painPoints", "solutionMapping", "summary"],
       additionalProperties: false,
     });
-    return res.json({ taskId });
+    // Return the real Google reviews alongside the task so the UI can show them
+    // immediately, independent of the LLM analysis.
+    return res.json({ taskId, googleReviews });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
