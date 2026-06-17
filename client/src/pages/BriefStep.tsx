@@ -124,6 +124,17 @@ export default function BriefStep({ business, lead, memories, brief, setBrief, c
         setReviewsLoading(false);
         return;
       }
+      if (!data.taskId) {
+        setReviewAnalysis({
+          reviews: data.reviews || [],
+          painPoints: data.painPoints || [],
+          solutionMapping: data.solutionMapping || [],
+          relevanceKeywords: data.relevanceKeywords || [],
+          summary: data.summary || "No genuine customer reviews found for this company.",
+        });
+        setReviewsLoading(false);
+        return;
+      }
       const { taskId } = data;
       const realReviews = data.googleReviews || []; // genuine Google reviews to display
       const startTime = Date.now();

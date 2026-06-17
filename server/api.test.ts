@@ -146,4 +146,37 @@ describe("API route handlers", () => {
       close();
     }
   });
+
+  it("POST /api/scrape-reviews returns empty analysis when no review providers are configured", async () => {
+    const origGooglePlaces = process.env.GOOGLE_PLACES_API_KEY;
+    const origGoogleMaps = process.env.GOOGLE_MAPS_API_KEY;
+    const origExa = process.env.EXA_API_KEY;
+    delete process.env.GOOGLE_PLACES_API_KEY;
+    delete process.env.GOOGLE_MAPS_API_KEY;
+    delete process.env.EXA_API_KEY;
+
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/scrape-reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadName: "Example Company" }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.taskId).toBeUndefined();
+      expect(data.reviews).toEqual([]);
+      expect(data.painPoints).toEqual([]);
+      expect(data.solutionMapping).toEqual([]);
+      expect(data.relevanceKeywords).toEqual([]);
+      expect(data.summary).toBe("No genuine customer reviews found for this company.");
+    } finally {
+      close();
+      if (origGooglePlaces) process.env.GOOGLE_PLACES_API_KEY = origGooglePlaces;
+      if (origGoogleMaps) process.env.GOOGLE_MAPS_API_KEY = origGoogleMaps;
+      if (origExa) process.env.EXA_API_KEY = origExa;
+    }
+  });
 });

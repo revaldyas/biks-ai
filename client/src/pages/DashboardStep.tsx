@@ -21,12 +21,12 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
 
   useEffect(() => {
     fetchMemories();
-  }, []);
+  }, [business.website]);
 
   const fetchMemories = async () => {
     setFetching(true);
     try {
-      const res = await apiFetch("/api/mem0");
+      const res = await apiFetch(`/api/mem0?scope=${encodeURIComponent(business.website || business.companyName)}`);
       const data = await res.json();
       if (data.available && Array.isArray(data.items)) {
         setMemories(data.items);
@@ -42,7 +42,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
       const res = await apiFetch("/api/mem0", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: memoryInput.trim() }),
+        body: JSON.stringify({ text: memoryInput.trim(), scope: business.website || business.companyName }),
       });
       const data = await res.json();
       if (data.ok) {

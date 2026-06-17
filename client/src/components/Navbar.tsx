@@ -7,6 +7,7 @@ interface NavbarProps {
   canNavigateToStep: (step: number) => boolean;
   onStepClick: (step: number) => void;
   onReset: () => void;
+  onHome?: () => void;
   website: string;
   onSignOut?: () => void;
   trialDaysLeft?: number | null;
@@ -19,7 +20,7 @@ const steps = [
   { num: 4, label: "Marketing Kit" },
 ];
 
-export default function Navbar({ currentStep, maxStepReached, canNavigateToStep, onStepClick, onReset, website, onSignOut, trialDaysLeft, onOpenHistory }: NavbarProps) {
+export default function Navbar({ currentStep, maxStepReached, canNavigateToStep, onStepClick, onReset, onHome, website, onSignOut, trialDaysLeft, onOpenHistory }: NavbarProps) {
   const isMobile = useIsMobile();
   const domain = website ? website.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
 
@@ -33,11 +34,30 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
       background: "var(--bg)",
     }}>
       {/* Logo */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 17, color: "var(--ink)", letterSpacing: "-0.01em" }}>
+      <button
+        onClick={onHome || onReset}
+        aria-label="Return home"
+        style={{
+          display: "flex", alignItems: "center", gap: 8, minWidth: 0,
+          background: "none", border: "none", padding: 0, cursor: "pointer",
+          fontFamily: "var(--font-sans)", textAlign: "left",
+        }}
+      >
+        <span style={{ fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: 17, color: "var(--ink)", letterSpacing: "-0.01em", flexShrink: 0 }}>
           Biks.ai
         </span>
-      </div>
+        {domain && (
+          <>
+            <span style={{ color: "var(--ink-4)", fontSize: 13, flexShrink: 0 }}>x</span>
+            <span style={{
+              fontSize: 12, color: "var(--ink-3)", overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: isMobile ? 120 : 220,
+            }}>
+              {domain}
+            </span>
+          </>
+        )}
+      </button>
 
       {/* Step indicators */}
       <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8 }}>
@@ -93,7 +113,7 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
         })}
       </div>
 
-      {/* Right: trial + domain + reset + sign out */}
+      {/* Right: trial + reset + sign out */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: isMobile ? 8 : 12 }}>
         {typeof trialDaysLeft === "number" && (
           <span style={{
@@ -103,9 +123,6 @@ export default function Navbar({ currentStep, maxStepReached, canNavigateToStep,
           }}>
             {trialDaysLeft}d left
           </span>
-        )}
-        {!isMobile && domain && (
-          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{domain}</span>
         )}
         {onOpenHistory && (
           <button
