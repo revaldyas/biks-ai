@@ -9,6 +9,13 @@ import {
 
 const api = Router();
 
+const normalizeKey = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const scopedMem0UserId = (scope?: string, ownerId?: string) => {
+  const owner = normalizeKey(ownerId || "demo").slice(0, 80) || "demo";
+  const key = normalizeKey(scope || "global").slice(0, 80) || "global";
+  return `biks:${owner}:${key}`;
+};
+
 // Endpoints reachable without a logged-in session. Everything else under
 // `/api/*` requires a valid Supabase bearer token.
 const PUBLIC_API_PATHS = new Set<string>(["/api/notify-signup"]);
@@ -165,8 +172,17 @@ Return ONLY valid JSON (no markdown) with this structure:
   ],
   "products": ["Product/service 1", "Product 2"],
   "proofPoints": ["Credibility indicator 1", "Indicator 2"],
+  "capabilityModel": {
+    "capabilities": ["What the company can uniquely do"],
+    "outcomes": ["Measurable or observable buyer outcomes"],
+    "buyerPains": ["Business/customer pain this capability solves"],
+    "requiredBuyerConditions": ["Signals a prospect must have to need this"],
+    "currentMarkets": ["Markets already served, if visible"],
+    "proofPoints": ["Source-supported proof or credibility"],
+    "disqualifiers": ["Signals that make a prospect irrelevant"]
+  },
   "expansionCategories": [
-    { "name": "Clean 2-5 word market label, no '&'", "whyRelevant": "20-36 words: why this adjacent segment fits and its specific pain.", "salesAngle": "One-sentence pitch angle", "painPoints": ["Pain 1", "Pain 2"], "searchQueries": ["account-search query for this segment and the company's city"] }
+    { "name": "Clean 2-5 word market label, no '&'", "whyRelevant": "20-36 words: why this adjacent segment fits and its specific pain.", "whyNonObvious": "Why this is outside the obvious/current customer base.", "sharedPain": "The same underlying pain in this new market.", "salesAngle": "One-sentence pitch angle", "painPoints": ["Pain 1", "Pain 2"], "requiredEvidence": ["Evidence a lead must show"], "disqualifiers": ["Signals to reject/score low"], "confidence": 0-100, "searchQueries": ["5-10 account-search queries for this segment and the company's city"] }
   ]
 }
 
@@ -204,6 +220,20 @@ REQUIREMENTS:
         },
         products: { type: "array", items: { type: "string" } },
         proofPoints: { type: "array", items: { type: "string" } },
+        capabilityModel: {
+          type: "object",
+          properties: {
+            capabilities: { type: "array", items: { type: "string" } },
+            outcomes: { type: "array", items: { type: "string" } },
+            buyerPains: { type: "array", items: { type: "string" } },
+            requiredBuyerConditions: { type: "array", items: { type: "string" } },
+            currentMarkets: { type: "array", items: { type: "string" } },
+            proofPoints: { type: "array", items: { type: "string" } },
+            disqualifiers: { type: "array", items: { type: "string" } },
+          },
+          required: ["capabilities", "outcomes", "buyerPains", "requiredBuyerConditions", "currentMarkets", "proofPoints", "disqualifiers"],
+          additionalProperties: false,
+        },
         expansionCategories: {
           type: "array",
           items: {
@@ -211,16 +241,21 @@ REQUIREMENTS:
             properties: {
               name: { type: "string" },
               whyRelevant: { type: "string" },
+              whyNonObvious: { type: "string" },
+              sharedPain: { type: "string" },
               salesAngle: { type: "string" },
               painPoints: { type: "array", items: { type: "string" } },
+              requiredEvidence: { type: "array", items: { type: "string" } },
+              disqualifiers: { type: "array", items: { type: "string" } },
+              confidence: { type: "number" },
               searchQueries: { type: "array", items: { type: "string" } },
             },
-            required: ["name", "whyRelevant", "salesAngle", "painPoints", "searchQueries"],
+            required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "requiredEvidence", "disqualifiers", "confidence", "searchQueries"],
             additionalProperties: false,
           },
         },
       },
-      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "expansionCategories"],
+      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "capabilityModel", "expansionCategories"],
       additionalProperties: false,
     });
 
@@ -233,14 +268,16 @@ REQUIREMENTS:
 // ============================================================
 // GET /api/mem0 — Fetch all memories
 // ============================================================
-api.get("/api/mem0", async (_req: Request, res: Response) => {
+api.get("/api/mem0", async (req: Request, res: Response) => {
   const apiKey = process.env.MEM0_API_KEY;
   if (!apiKey) {
     return res.json({ available: false, items: [] });
   }
 
   try {
-    const memRes = await fetch("https://api.mem0.ai/v1/memories/?user_id=biks_hackathon_demo", {
+    const authedUser = (req as Request & { user?: SupabaseUser }).user;
+    const userId = scopedMem0UserId(req.query.scope as string | undefined, authedUser?.id);
+    const memRes = await fetch(`https://api.mem0.ai/v1/memories/?user_id=${encodeURIComponent(userId)}`, {
       headers: { Authorization: `Token ${apiKey}` },
     });
     if (!memRes.ok) {
@@ -265,12 +302,14 @@ api.post("/api/mem0", async (req: Request, res: Response) => {
     return res.json({ ok: false, error: "Mem0 not configured" });
   }
 
-  const { text } = req.body;
+  const { text, scope } = req.body;
   if (!text) {
     return res.status(400).json({ ok: false, error: "text is required" });
   }
 
   try {
+    const authedUser = (req as Request & { user?: SupabaseUser }).user;
+    const userId = scopedMem0UserId(scope, authedUser?.id);
     const memRes = await fetch("https://api.mem0.ai/v1/memories/", {
       method: "POST",
       headers: {
@@ -279,7 +318,7 @@ api.post("/api/mem0", async (req: Request, res: Response) => {
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: text }],
-        user_id: "biks_hackathon_demo",
+        user_id: userId,
       }),
     });
     const data: any = await memRes.json();
@@ -298,7 +337,7 @@ api.post("/api/mem0", async (req: Request, res: Response) => {
         const eventId = first.event_id;
         for (let i = 0; i < 5; i++) {
           await new Promise(r => setTimeout(r, 1000));
-          const pollRes = await fetch(`https://api.mem0.ai/v1/memories/?user_id=biks_hackathon_demo`, {
+          const pollRes = await fetch(`https://api.mem0.ai/v1/memories/?user_id=${encodeURIComponent(userId)}`, {
             headers: { Authorization: `Token ${apiKey}` },
           });
           const memories: any = await pollRes.json();
@@ -349,15 +388,17 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
       return res.json({ ok: false, error: e.message });
     }
   } else {
-    // Delete all memories
+    // Delete all memories for this analyzed-business scope.
     try {
+      const authedUser = (req as Request & { user?: SupabaseUser }).user;
+      const userId = scopedMem0UserId(req.query.scope as string | undefined, authedUser?.id);
       await fetch("https://api.mem0.ai/v1/memories/", {
         method: "DELETE",
         headers: {
           Authorization: `Token ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ user_id: "biks_hackathon_demo" }),
+        body: JSON.stringify({ user_id: userId }),
       });
       return res.json({ ok: true });
     } catch (e: any) {
@@ -370,14 +411,19 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
 // POST /api/exa-search — Lead discovery via Exa
 // ============================================================
 api.post("/api/exa-search", async (req: Request, res: Response) => {
+  const { query, queries, city, numResults = 5, business, category, memories = [] } = req.body;
+  const baseQueries = Array.from(new Set(
+    (Array.isArray(queries) ? queries : [query])
+      .map((q: any) => String(q || "").trim())
+      .filter(Boolean)
+  ));
+  if (baseQueries.length === 0) {
+    return res.status(400).json({ error: "query is required" });
+  }
+
   const apiKey = process.env.EXA_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "Exa not configured" });
-  }
-
-  const { query, city, numResults = 5 } = req.body;
-  if (!query) {
-    return res.status(400).json({ error: "query is required" });
   }
 
   // City-to-country and domain mapping for strict filtering
@@ -400,12 +446,31 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
   const meta = cityMeta[city?.toLowerCase()] || { country: city || "", domains: [], strictTerms: [city?.toLowerCase() || ""] };
 
   try {
-    // Strategy: Run TWO separate Exa queries for better city-specific results
-    // Query 1: Explicit city-focused query
-    // Query 2: Country domain-restricted query
-    const cityQuery = city
-      ? `${query} located in ${city}, ${meta.country}`
-      : query;
+    const memoryTexts = (Array.isArray(memories) ? memories : [])
+      .map((m: any) => String(typeof m === "string" ? m : m?.text || ""))
+      .filter(Boolean);
+    const memoryContext = memoryTexts.length ? memoryTexts.join("; ") : "";
+    const requiredEvidence = Array.isArray(category?.requiredEvidence) ? category.requiredEvidence : [];
+    const disqualifiers = Array.isArray(category?.disqualifiers) ? category.disqualifiers : [];
+    const capabilityBits = [
+      ...(business?.capabilityModel?.capabilities || []),
+      ...(business?.capabilityModel?.outcomes || []),
+      ...(business?.capabilityModel?.buyerPains || []),
+      ...(business?.capabilityModel?.requiredBuyerConditions || []),
+    ].filter(Boolean).slice(0, 12);
+    const contextSuffix = [
+      memoryContext ? `business preferences: ${memoryContext}` : "",
+      requiredEvidence.length ? `must show: ${requiredEvidence.join(", ")}` : "",
+      capabilityBits.length ? `seller capability fit: ${capabilityBits.join(", ")}` : "",
+    ].filter(Boolean).join(" ");
+    const searchQueries = Array.from(new Set(
+      baseQueries.flatMap((q) => {
+        const scoped = city ? `${q} in ${city}` : q;
+        const located = city ? `${q} located in ${city}, ${meta.country}` : q;
+        const contextual = contextSuffix ? `${scoped} ${contextSuffix}` : scoped;
+        return [scoped, located, contextual];
+      })
+    )).slice(0, 12);
 
     const fetchExa = async (q: string, includeDomains?: string[]) => {
       const body: any = {
@@ -432,18 +497,19 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       return d.results || [];
     };
 
-    // Run both queries in parallel
-    const [results1, results2] = await Promise.all([
-      fetchExa(cityQuery),
-      meta.domains.length > 0 && meta.domains[0] !== ".com"
-        ? fetchExa(query, meta.domains)
-        : Promise.resolve([]),
+    // Run multiple opportunity queries in parallel. Memory context is prioritized
+    // when present; capability-derived queries remain the fallback when it is not.
+    const resultSets = await Promise.all([
+      ...searchQueries.map((q) => fetchExa(q)),
+      ...(meta.domains.length > 0 && meta.domains[0] !== ".com"
+        ? baseQueries.map((q) => fetchExa(q, meta.domains))
+        : []),
     ]);
 
     // Merge and deduplicate by URL
     const seen = new Set<string>();
     const merged: any[] = [];
-    for (const r of [...results1, ...results2]) {
+    for (const r of resultSets.flat()) {
       const url = (r.url || "").toLowerCase().replace(/\/$/, "");
       if (!seen.has(url)) {
         seen.add(url);
@@ -560,6 +626,105 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       console.log(`[exa-search] post-filter kept=${results.length} dropped=${drops}`);
     }
 
+    const scoreHeuristic = (r: any) => {
+      const text = `${r.title || ""} ${r.summary || ""} ${(r.highlights || []).join(" ")} ${r._pageText || ""}`.toLowerCase();
+      let score = 2;
+      const evidenceHits = requiredEvidence.filter((e: string) => text.includes(String(e).toLowerCase()));
+      const capabilityHits = capabilityBits.filter((e: string) => text.includes(String(e).toLowerCase()));
+      const disqHits = disqualifiers.filter((e: string) => text.includes(String(e).toLowerCase()));
+      if (evidenceHits.length) score += 1;
+      if (capabilityHits.length) score += 1;
+      if (memoryContext && memoryTexts.some((m: string) => text.includes(m.toLowerCase().split(/\s+/).find(w => w.length > 5) || "__none__"))) score += 1;
+      if (/directory|blog|article|news|list of|top \d+/i.test(r.url || "")) score -= 1;
+      if (disqHits.length) score -= 2;
+      return {
+        ...r,
+        fitScore: Math.max(1, Math.min(5, score)),
+        evidence: r.summary || r.highlights?.[0] || "Matched by Exa search and location filters.",
+        whyThisCompanyFits: evidenceHits.length
+          ? `Matches required evidence: ${evidenceHits.slice(0, 3).join(", ")}.`
+          : "Potential fit based on the selected opportunity and location-filtered company evidence.",
+        disqualifiers: disqHits,
+        contextApplied: [
+          ...(memoryContext ? ["mem0 business context"] : ["website capability fallback"]),
+          ...(requiredEvidence.length ? ["required evidence"] : []),
+        ],
+        memoriesUsed: memoryTexts,
+      };
+    };
+
+    const heuristicResults = results.map(scoreHeuristic);
+
+    try {
+      if (process.env.MANUS_API_KEY && heuristicResults.length > 0) {
+        const validationPrompt = `You are validating B2B lead search results before they are shown to a user.
+
+Seller:
+${JSON.stringify({
+  companyName: business?.companyName,
+  products: business?.products,
+  capabilityModel: business?.capabilityModel,
+}, null, 2)}
+
+Selected opportunity:
+${JSON.stringify(category || {}, null, 2)}
+
+mem0 business context from the user (highest priority when present):
+${memoryTexts.length ? memoryTexts.map((m: string, i: number) => `${i + 1}. ${m}`).join("\n") : "None provided. Use website-derived capability fallback."}
+
+City/country required: ${city || "Any"} ${meta.country ? `(${meta.country})` : ""}
+
+Candidate companies:
+${heuristicResults.slice(0, Math.max(numResults * 2, 12)).map((r: any, i: number) => `${i + 1}. ${JSON.stringify({
+  title: r.title,
+  url: r.url,
+  summary: r.summary,
+  highlights: r.highlights,
+  pageText: String(r._pageText || "").slice(0, 1200),
+})}`).join("\n")}
+
+Return ONLY valid JSON. Validate that each lead is a real operating company, in the correct location, relevant to the selected opportunity, and supported by evidence. Reject or score low if it is a directory/blog/article, wrong country/city, not operating, lacks required buyer condition, or only keyword-adjacent.`;
+
+        const validated = await manusTask<any>(validationPrompt, {
+          type: "object",
+          properties: {
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  url: { type: "string" },
+                  summary: { type: "string" },
+                  fitScore: { type: "number" },
+                  evidence: { type: "string" },
+                  whyThisCompanyFits: { type: "string" },
+                  disqualifiers: { type: "array", items: { type: "string" } },
+                  contextApplied: { type: "array", items: { type: "string" } },
+                  memoriesUsed: { type: "array", items: { type: "string" } },
+                },
+                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["results"],
+          additionalProperties: false,
+        }, { timeoutMs: 90_000, pollMs: 2_000 });
+
+        const byUrl = new Map(heuristicResults.map((r: any) => [String(r.url || "").toLowerCase(), r]));
+        results = (validated.results || [])
+          .map((v: any) => ({ ...(byUrl.get(String(v.url || "").toLowerCase()) || {}), ...v }))
+          .filter((r: any) => r.url)
+          .sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+      } else {
+        results = heuristicResults.sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+      }
+    } catch (e: any) {
+      console.warn("[exa-search] Manus validation failed; using heuristic ranking:", e?.message);
+      results = heuristicResults.sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+    }
+
     // Remove internal fields before returning
     results = results.slice(0, numResults).map(({ _fullText, _pageText, _url, _host, ...rest }: any) => rest);
 
@@ -577,14 +742,14 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
 // POST /api/find-contacts — Contact finder via Exa LinkedIn
 // ============================================================
 api.post("/api/find-contacts", async (req: Request, res: Response) => {
-  const apiKey = process.env.EXA_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "Exa not configured" });
-  }
-
   const { leadName, city, leadUrl } = req.body;
   if (!leadName) {
     return res.status(400).json({ error: "leadName is required" });
+  }
+
+  const apiKey = process.env.EXA_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "Exa not configured" });
   }
 
   // --- Company verification helpers (avoid returning execs from other companies) ---
@@ -938,16 +1103,16 @@ Return ONLY valid JSON with this structure:
 // POST /api/send-email — Send outreach email via Resend
 // ============================================================
 api.post("/api/send-email", async (req: Request, res: Response) => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ ok: false, error: "Resend not configured" });
-  }
-
   const { subject, html, from } = req.body;
   // Fixed recipient as configured
   const to = "ngurah.linggih@gmail.com";
   if (!subject || !html) {
     return res.status(400).json({ ok: false, error: "subject and html are required" });
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, error: "Resend not configured" });
   }
 
   try {
@@ -1327,6 +1492,7 @@ api.post("/api/scrape-reviews", async (req: Request, res: Response) => {
         reviews: [],
         painPoints: [],
         solutionMapping: [],
+        relevanceKeywords: [],
         summary: "No genuine customer reviews found for this company.",
       });
     }

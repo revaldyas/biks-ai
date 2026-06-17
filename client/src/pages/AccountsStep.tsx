@@ -48,15 +48,23 @@ export default function AccountsStep({
   const searchLeads = async () => {
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
-    const baseQuery = cat.searchQueries?.[0] || `${cat.name} premium`;
-    const query = `${baseQuery} in ${city}`;
+    const queries = cat.searchQueries?.length ? cat.searchQueries : [`${cat.name} premium`];
+    const query = `${queries[0]} in ${city}`;
 
     try {
       setSearchMessage("");
       const res = await apiFetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, city, numResults: 8 }),
+        body: JSON.stringify({
+          query,
+          queries,
+          city,
+          numResults: 8,
+          business,
+          category: cat,
+          memories: memories.map(m => m.text),
+        }),
       });
       const data = await res.json();
       if (data.message) {
@@ -67,7 +75,7 @@ export default function AccountsStep({
         name: r.title,
         email: r.email || null,
         linkedinUrl: r.linkedinUrl || null,
-        fitScore: scoreResult(r, cat.name, city, memories),
+        fitScore: r.fitScore || scoreResult(r, cat.name, city, memories),
         category: cat.name,
         city,
         status: "pending" as const,
@@ -88,7 +96,7 @@ export default function AccountsStep({
       const res = await apiFetch("/api/mem0", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: `Rejected lead "${leads[idx].name}": ${rejectReason}` }),
+        body: JSON.stringify({ text: `Rejected lead "${leads[idx].name}" for ${business.companyName}: ${rejectReason}`, scope: business.website || business.companyName }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -298,10 +306,27 @@ export default function AccountsStep({
                   </div>
                   <div style={fieldLabel}>Evidence</div>
                   <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
-                    {lead.summary
-                      ? `${lead.summary.slice(0, 160)}${lead.summary.length > 160 ? "..." : ""}`
+                    {(lead.evidence || lead.summary)
+                      ? `${(lead.evidence || lead.summary).slice(0, 220)}${(lead.evidence || lead.summary).length > 220 ? "..." : ""}`
                       : "No evidence text available."}
                   </div>
+                  {lead.whyThisCompanyFits && (
+                    <>
+                      <div style={{ ...fieldLabel, marginTop: 10 }}>Why It Fits</div>
+                      <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
+                        {lead.whyThisCompanyFits}
+                      </div>
+                    </>
+                  )}
+                  {lead.disqualifiers && lead.disqualifiers.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                      {lead.disqualifiers.slice(0, 3).map((d, i) => (
+                        <span key={i} style={{ fontSize: 10, color: "var(--danger-text)", background: "var(--danger-wash)", border: "1px solid var(--danger)", borderRadius: 999, padding: "2px 8px" }}>
+                          {d}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Right: relevance + decision */}

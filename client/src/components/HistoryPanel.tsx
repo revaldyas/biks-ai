@@ -34,9 +34,9 @@ export default function HistoryPanel({ open, onClose, onOpenItem }: {
     deleteHistory(id);
   };
   const clearAll = async () => {
-    if (!window.confirm("Delete all saved history? This can't be undone.")) return;
-    const all = items || [];
-    setItems([]); // optimistic
+    const all = (items || []).filter((r) => r.kind === "analysis");
+    if (!window.confirm("Delete all saved Company Analysis history? This can't be undone.")) return;
+    setItems((prev) => (prev ? prev.filter((r) => r.kind !== "analysis") : prev)); // optimistic
     const results = await Promise.all(all.map((r) => deleteHistory(r.id)));
     if (results.some((ok) => !ok)) {
       listHistory().then(setItems); // some failed — reflect reality

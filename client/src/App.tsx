@@ -29,6 +29,15 @@ export interface BusinessProfile {
   }[];
   products: string[];
   proofPoints: string[];
+  capabilityModel?: {
+    capabilities: string[];
+    outcomes: string[];
+    buyerPains: string[];
+    requiredBuyerConditions: string[];
+    currentMarkets: string[];
+    proofPoints: string[];
+    disqualifiers: string[];
+  };
   expansionCategories: ExpansionCategory[];
 }
 
@@ -38,6 +47,13 @@ export interface ExpansionCategory {
   salesAngle: string;
   painPoints: string[];
   searchQueries: string[];
+  whyNonObvious?: string;
+  sharedPain?: string;
+  requiredEvidence?: string[];
+  disqualifiers?: string[];
+  confidence?: number;
+  contextApplied?: string[];
+  memoriesUsed?: string[];
 }
 
 export interface Lead {
@@ -52,6 +68,11 @@ export interface Lead {
   rejectionReason?: string;
   email?: string | null;
   linkedinUrl?: string | null;
+  evidence?: string;
+  whyThisCompanyFits?: string;
+  disqualifiers?: string[];
+  contextApplied?: string[];
+  memoriesUsed?: string[];
 }
 
 export interface MemoryItem {
@@ -118,10 +139,10 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
   // Company Analysis history row, so reopening it later restores all the work — debounced.
   useEffect(() => {
     if (!sessionId || !business) return;
-    const snapshot = { business, leads, selectedLead, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached };
+    const snapshot = { business, leads, selectedLead, brief, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached };
     const t = setTimeout(() => { updateHistoryData(sessionId, snapshot); }, 800);
     return () => clearTimeout(t);
-  }, [sessionId, business, leads, selectedLead, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached]);
+  }, [sessionId, business, leads, selectedLead, brief, contacts, salesKit, reviewAnalysis, initialCategory, maxStepReached]);
 
   // Reopen a saved item — restores the FULL session and jumps to where you left off,
   // with no Manus re-run. Keeps editing the same row so further work is saved into it.
@@ -131,6 +152,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       setBusiness(d.business);
       setLeads(d.leads || []);
       setSelectedLead(d.selectedLead || null);
+      setBrief(d.brief || null);
       setContacts(d.contacts || []);
       setSalesKit(d.salesKit || null);
       setReviewAnalysis(d.reviewAnalysis || null);
@@ -195,6 +217,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
           canNavigateToStep={canNavigateToStep}
           onStepClick={handleStepClick}
           onReset={handleReset}
+          onHome={handleReset}
           website={business?.website || ""}
           onSignOut={onSignOut}
           trialDaysLeft={trialDaysLeft}
