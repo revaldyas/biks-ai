@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
-import apiRoutes, { normalizeOpportunityResult } from "./api";
+import { readFileSync } from "fs";
+import apiRoutes, { normalizeCompanyAnalysisResult, normalizeOpportunityResult } from "./api";
 
 function createTestApp() {
   const app = express();
@@ -21,6 +22,37 @@ function startServer(app: express.Express): Promise<{ port: number; close: () =>
 }
 
 describe("API route handlers", () => {
+  it("normalizes opportunities returned with the company profile", () => {
+    const result = normalizeCompanyAnalysisResult({
+      companyName: "Example Water Systems",
+      capabilityModel: { capabilities: ["Closed-loop water treatment"] },
+      expansionCategories: [{
+        name: "Aquatic Rehabilitation Facilities",
+        whyRelevant: "Therapy pools require controlled water treatment.",
+        whyNonObvious: "The seller currently serves industrial facilities.",
+        sharedPain: "Maintaining safe water with fewer chemicals.",
+        salesAngle: "Apply closed-loop treatment to therapy pools.",
+        painPoints: ["Chemical exposure"],
+        disqualifiers: ["No on-site aquatic facility"],
+        confidence: 82,
+        searchQueries: ["rehabilitation facility hydrotherapy pool"],
+        mustHaveEvidence: [{
+          requirement: "Operates a hydrotherapy pool",
+          acceptableSignals: ["hydrotherapy pool"],
+          sellerCapability: "Closed-loop water treatment",
+          sourceType: "website",
+          sourceEvidence: "Closed-loop treatment systems",
+          confidence: 88,
+        }],
+      }],
+    });
+
+    expect(result.companyName).toBe("Example Water Systems");
+    expect(result.expansionCategories).toHaveLength(1);
+    expect(result.expansionCategories[0].requiredEvidence).toEqual(["Operates a hydrotherapy pool"]);
+    expect(result.expansionCategories[0].memoriesUsed).toEqual([]);
+  });
+
   it("normalizes schema-less Manus opportunity fields", () => {
     const categories = normalizeOpportunityResult({
       expansionCategories: [{
@@ -180,7 +212,62 @@ describe("API route handlers", () => {
     }
   });
 
-  it("POST /api/generate-opportunities requires a capability profile", async () => {
+  it("POST /api/analyze-website starts one combined Manus task without memory context", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalManus = process.env.MANUS_API_KEY;
+    process.env.MANUS_API_KEY = "test-manus-key";
+    const taskBodies: any[] = [];
+    const websiteText = `Example Water Systems provides closed-loop filtration and industrial water treatment. ${"Verified operating capability. ".repeat(20)}`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      if (String(input).includes("api.manus.ai/v2/task.create")) {
+        taskBodies.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({ ok: true, task_id: "combined-analysis-task" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (String(input).startsWith("https://example-water.test")) {
+        return new Response(`<html><body>${websiteText}</body></html>`, { status: 200 });
+      }
+      return originalFetch(input, init);
+    });
+
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+    try {
+      const res = await fetch(`http://localhost:${port}/api/analyze-website`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://example-water.test" }),
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).taskId).toBe("combined-analysis-task");
+      expect(taskBodies).toHaveLength(1);
+      expect(taskBodies[0].agent_profile).toBe("manus-1.6");
+      expect(taskBodies[0].message.content).toContain("expansionCategories");
+      expect(taskBodies[0].message.content).not.toContain("prioritize premium buyers");
+      expect(taskBodies[0].message.content).not.toContain("mem0 business context");
+    } finally {
+      close();
+      fetchSpy.mockRestore();
+      if (originalManus) process.env.MANUS_API_KEY = originalManus;
+      else delete process.env.MANUS_API_KEY;
+    }
+  });
+
+  it("keeps one Generate Leads action and no separate opportunity flow in the UI", () => {
+    const dashboard = readFileSync(new URL("../client/src/pages/DashboardStep.tsx", import.meta.url), "utf8");
+    const accounts = readFileSync(new URL("../client/src/pages/AccountsStep.tsx", import.meta.url), "utf8");
+    const combined = `${dashboard}\n${accounts}`;
+
+    expect(combined).not.toContain("/api/generate-opportunities");
+    expect(combined).not.toContain("/api/poll-opportunities");
+    expect(dashboard).not.toContain("Find Opportunities");
+    expect(dashboard).toContain("Choose Market and Location");
+    expect(combined.match(/Generate Leads/g)).toHaveLength(1);
+  });
+
+  it("does not expose a separate opportunity-generation endpoint", async () => {
     const app = createTestApp();
     const { port, close } = await startServer(app);
     try {
@@ -189,8 +276,7 @@ describe("API route handlers", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ business: { companyName: "Example" } }),
       });
-      expect(res.status).toBe(400);
-      expect((await res.json()).error).toContain("capability profile");
+      expect(res.status).toBe(404);
     } finally {
       close();
     }

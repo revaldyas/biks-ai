@@ -10,6 +10,43 @@ import { lowQualitySourceReason, matchMandatoryEvidence, selectStrongestQueries,
 
 const api = Router();
 
+const analysisTaskTimings = new Map<string, { startedAt: number; url: string }>();
+const opportunitySchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      whyRelevant: { type: "string" },
+      whyNonObvious: { type: "string" },
+      sharedPain: { type: "string" },
+      salesAngle: { type: "string" },
+      painPoints: { type: "array", items: { type: "string" } },
+      disqualifiers: { type: "array", items: { type: "string" } },
+      confidence: { type: "number" },
+      searchQueries: { type: "array", items: { type: "string" } },
+      mustHaveEvidence: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            requirement: { type: "string" },
+            acceptableSignals: { type: "array", items: { type: "string" } },
+            sellerCapability: { type: "string" },
+            sourceType: { type: "string" },
+            sourceEvidence: { type: "string" },
+            confidence: { type: "number" },
+          },
+          required: ["requirement", "acceptableSignals", "sellerCapability", "sourceType", "sourceEvidence", "confidence"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "disqualifiers", "confidence", "searchQueries", "mustHaveEvidence"],
+    additionalProperties: false,
+  },
+};
+
 const normalizeKey = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const scopedMem0UserId = (scope?: string, ownerId?: string) => {
   const owner = normalizeKey(ownerId || "demo").slice(0, 80) || "demo";
@@ -70,6 +107,7 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "URL is required" });
   }
 
+  const requestStartedAt = Date.now();
   try {
     // Fetch website content (fast, done server-side before creating task)
     const fetchWithTimeout = async (targetUrl: string, timeoutMs: number) => {
@@ -142,6 +180,8 @@ api.post("/api/analyze-website", async (req: Request, res: Response) => {
       return res.status(502).json({ error: "Failed to fetch website content. The site may be slow, offline, or blocking automated requests." });
     }
 
+    console.log(`[analysis:timing] scrape_complete url=${url} durationMs=${Date.now() - requestStartedAt} contentLength=${content.length}`);
+
     const prompt = `You are a sharp B2B sales analyst producing CONCISE, website-ready analysis copy for a card-based UI. All website content is already provided below — do NOT browse the web or visit any URLs.
 
 URL: ${url}
@@ -184,14 +224,43 @@ Return ONLY valid JSON (no markdown) with this structure:
     "currentMarkets": ["Markets already served, if visible"],
     "proofPoints": ["Source-supported proof or credibility"],
     "disqualifiers": ["Signals that make a prospect irrelevant"]
-  }
+  },
+  "expansionCategories": [
+    {
+      "name": "Specific adjacent buyer market",
+      "whyRelevant": "Why this market needs a transferable capability",
+      "whyNonObvious": "Why this is outside the seller's current markets",
+      "sharedPain": "Concrete pain shared with current buyers",
+      "salesAngle": "Capability-led sales angle",
+      "painPoints": ["Buyer pain"],
+      "disqualifiers": ["Observable signal that makes a company irrelevant"],
+      "confidence": 0,
+      "searchQueries": ["Location-free organization query containing a prerequisite signal"],
+      "mustHaveEvidence": [
+        {
+          "requirement": "Observable condition required to need the offering",
+          "acceptableSignals": ["Specific phrase or facility signal"],
+          "sellerCapability": "Website-derived capability",
+          "sourceType": "website",
+          "sourceEvidence": "Exact supporting website evidence",
+          "confidence": 0
+        }
+      ]
+    }
+  ]
 }
 
 REQUIREMENTS:
 - valuePropositions: EXACTLY 3 (the strongest, source-supported).
 - customerSegments: 3-5. clientNames empty if none shown — never invent.
 - websiteEvidence: 3-10 concise facts with exact supporting quotes. Never paraphrase the quote.
-- currentSegments = the customerSegments labels (kept for backward compatibility).`;
+- currentSegments = the customerSegments labels (kept for backward compatibility).
+- expansionCategories: 1-3 genuinely adjacent, non-obvious markets, or an empty array when evidence is insufficient.
+- Derive opportunities ONLY from the supplied website content, capability model, and website evidence. User memory or business context is not available and must not be inferred.
+- Every opportunity must link a transferable capability to a concrete buyer pain and include at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably need the offering.
+- Each prerequisite needs specific acceptable website signals, its seller capability, exact source evidence, and confidence. Avoid broad markets whose members commonly lack the prerequisite.
+- searchQueries must be location-free, target organizations rather than articles, contain concrete prerequisite signals, and never include a city or country.
+- Return fewer opportunities rather than weak or generic ones. Confidence below 60 will be discarded.`;
 
     const taskId = await startManusTask(prompt, {
       type: "object",
@@ -248,10 +317,14 @@ REQUIREMENTS:
           required: ["capabilities", "outcomes", "buyerPains", "requiredBuyerConditions", "currentMarkets", "proofPoints", "disqualifiers"],
           additionalProperties: false,
         },
+        expansionCategories: opportunitySchema,
       },
-      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "websiteEvidence", "capabilityModel"],
+      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "websiteEvidence", "capabilityModel", "expansionCategories"],
       additionalProperties: false,
     }, { profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
+
+    analysisTaskTimings.set(taskId, { startedAt: requestStartedAt, url });
+    console.log(`[analysis:timing] task_created taskId=${taskId} url=${url} durationMs=${Date.now() - requestStartedAt}`);
 
     return res.json({ taskId });
   } catch (e: any) {
@@ -401,56 +474,6 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// POST /api/exa-search — Lead discovery via Exa
-// ============================================================
-api.post("/api/generate-opportunities", async (req: Request, res: Response) => {
-  const { business } = req.body;
-  if (!business?.companyName || !business?.capabilityModel) return res.status(400).json({ error: "business capability profile is required" });
-
-  const prompt = `You are the opportunity-reasoning layer for an industry-agnostic B2B sales product.
-
-Seller profile extracted from its website:
-${JSON.stringify({ companyName: business.companyName, website: business.website, products: business.products, valuePropositions: business.valuePropositions, capabilityModel: business.capabilityModel, websiteEvidence: business.websiteEvidence }, null, 2)}
-
-Generate 1-3 genuinely adjacent, non-obvious markets only when supported. Return fewer or zero rather than inventing weak opportunities.
-For every market, link it to a transferable seller capability and concrete buyer pain. Define at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably use or need the seller's offering. Each prerequisite must include specific acceptable website signals, the linked seller capability, its source, supporting source evidence, and confidence. Use only the website-derived capability model and website evidence. Search queries must be location-free, target organizations rather than articles, and include concrete prerequisite signals. Never put a city or country in a base query. Disqualifiers must be concrete. Avoid broad labels whose members commonly lack the mandatory prerequisite.
-
-Return JSON with an expansionCategories array. Even if structured output is unavailable, use these exact field names:
-{"expansionCategories":[{"name":"","whyRelevant":"","whyNonObvious":"","sharedPain":"","salesAngle":"","painPoints":[""],"disqualifiers":[""],"confidence":0,"searchQueries":[""],"mustHaveEvidence":[{"requirement":"","acceptableSignals":[""],"sellerCapability":"","sourceType":"website","sourceEvidence":"","confidence":0}]}]}`;
-
-  try {
-    const taskId = await startManusTask(prompt, {
-      type: "object",
-      properties: {
-        expansionCategories: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              name: { type: "string" }, whyRelevant: { type: "string" }, whyNonObvious: { type: "string" }, sharedPain: { type: "string" }, salesAngle: { type: "string" },
-              painPoints: { type: "array", items: { type: "string" } }, disqualifiers: { type: "array", items: { type: "string" } }, confidence: { type: "number" }, searchQueries: { type: "array", items: { type: "string" } },
-              mustHaveEvidence: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: { requirement: { type: "string" }, acceptableSignals: { type: "array", items: { type: "string" } }, sellerCapability: { type: "string" }, sourceType: { type: "string" }, sourceEvidence: { type: "string" }, confidence: { type: "number" } },
-                  required: ["requirement", "acceptableSignals", "sellerCapability", "sourceType", "sourceEvidence", "confidence"], additionalProperties: false,
-                },
-              },
-            },
-            required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "disqualifiers", "confidence", "searchQueries", "mustHaveEvidence"], additionalProperties: false,
-          },
-        },
-      },
-      required: ["expansionCategories"], additionalProperties: false,
-    }, { profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
-    return res.json({ taskId });
-  } catch (error: any) {
-    return res.status(500).json({ error: error.message || "Opportunity generation failed" });
-  }
-});
-
 const opportunityConfidence = (category: any) => {
   const numeric = Number(category?.confidence);
   if (Number.isFinite(numeric)) return numeric <= 1 ? numeric * 100 : numeric;
@@ -512,22 +535,14 @@ export const normalizeOpportunityResult = (generated: any) => (Array.isArray(gen
   .filter((category: any) => category.name && category.mustHaveEvidence.length > 0 && category.searchQueries.length > 0)
   .slice(0, 3);
 
-api.get("/api/poll-opportunities", async (req: Request, res: Response) => {
-  const { id } = req.query;
-  if (!id || typeof id !== "string") return res.status(400).json({ error: "id is required" });
-  try {
-    const status = await checkManusTask(id);
-    if (status.status !== "done") return res.json(status);
-    return res.json({
-      status: "done",
-      expansionCategories: normalizeOpportunityResult(status.result),
-      contextApplied: "website capability model",
-    });
-  } catch (error: any) {
-    return res.status(500).json({ error: error.message || "Opportunity polling failed" });
-  }
+export const normalizeCompanyAnalysisResult = (generated: any) => ({
+  ...generated,
+  expansionCategories: normalizeOpportunityResult(generated),
 });
 
+// ============================================================
+// POST /api/exa-search — Lead discovery via Exa
+// ============================================================
 api.post("/api/exa-search", async (req: Request, res: Response) => {
   const { query, queries, city, numResults = 5, business, category, memories = [] } = req.body;
   const candidateQueries = Array.from(new Set(
@@ -1599,7 +1614,18 @@ api.get("/api/poll-task", async (req: Request, res: Response) => {
   }
   try {
     const status = await checkManusTask(id);
-    return res.json(status);
+    if (status.status !== "done") return res.json(status);
+
+    const result: any = status.result;
+    const isCompanyAnalysis = Boolean(result?.companyName || result?.capabilityModel);
+    if (!isCompanyAnalysis) return res.json(status);
+
+    const normalized = normalizeCompanyAnalysisResult(result);
+    const timing = analysisTaskTimings.get(id);
+    console.log(`[analysis:timing] task_complete taskId=${id} durationMs=${timing ? Date.now() - timing.startedAt : "unknown"}`);
+    console.log(`[analysis:timing] normalization_complete taskId=${id} opportunities=${normalized.expansionCategories.length}`);
+    analysisTaskTimings.delete(id);
+    return res.json({ status: "done", result: normalized });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
