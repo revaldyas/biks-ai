@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
-import apiRoutes from "./api";
+import apiRoutes, { normalizeOpportunityResult } from "./api";
 
 function createTestApp() {
   const app = express();
@@ -21,6 +21,39 @@ function startServer(app: express.Express): Promise<{ port: number; close: () =>
 }
 
 describe("API route handlers", () => {
+  it("normalizes schema-less Manus opportunity fields", () => {
+    const categories = normalizeOpportunityResult({
+      expansionCategories: [{
+        marketLabel: "Aquatic Therapy Facilities",
+        marketDescription: "Clinical facilities with treated-water installations.",
+        adjacencyRationale: "The seller's low-chemical treatment transfers to patient pools.",
+        transferableCapability: {
+          capability: "Low-chemical water treatment",
+          capabilitySource: "websiteEvidence",
+          sourceEvidence: [{ quote: "90 percent fewer chemicals" }],
+        },
+        buyerPains: [{ pain: "Chemical exposure for sensitive patients" }],
+        mandatoryBuyerPrerequisites: [{
+          prerequisiteLabel: "Operates an aquatic therapy pool",
+          acceptableWebsiteSignals: ["aquatic therapy", "hydrotherapy pool"],
+          disqualifyingSignals: ["no on-site pool"],
+          confidence: 0.82,
+        }],
+        suggestedSearchQueries: ["rehabilitation center aquatic therapy pool"],
+        opportunityStrength: "HIGH",
+      }],
+    });
+
+    expect(categories).toHaveLength(1);
+    expect(categories[0].name).toBe("Aquatic Therapy Facilities");
+    expect(categories[0].mustHaveEvidence[0]).toMatchObject({
+      requirement: "Operates an aquatic therapy pool",
+      sellerCapability: "Low-chemical water treatment",
+      sourceType: "website",
+      confidence: 82,
+    });
+    expect(categories[0].searchQueries).toEqual(["rehabilitation center aquatic therapy pool"]);
+  });
   it("GET /api/mem0 returns unavailable when key is missing", async () => {
     const origKey = process.env.MEM0_API_KEY;
     delete process.env.MEM0_API_KEY;

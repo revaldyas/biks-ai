@@ -80,12 +80,26 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Opportunity discovery failed");
-      const expansionCategories = Array.isArray(data.expansionCategories) ? data.expansionCategories : [];
-      setBusiness({ ...business, expansionCategories });
-      setContextDirty(false);
-      if (!expansionCategories.length) {
-        setOpportunityError("No opportunity passed the evidence threshold. Add more business context or try a richer website.");
+      if (!data.taskId) throw new Error("Opportunity task did not start");
+
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 240_000) {
+        await new Promise(resolve => setTimeout(resolve, 3_000));
+        const pollResponse = await apiFetch(`/api/poll-opportunities?id=${encodeURIComponent(data.taskId)}`);
+        const status = await pollResponse.json();
+        if (!pollResponse.ok) throw new Error(status.error || "Opportunity polling failed");
+        if (status.status === "error") throw new Error(status.message || "Opportunity discovery failed");
+        if (status.status !== "done") continue;
+
+        const expansionCategories = Array.isArray(status.expansionCategories) ? status.expansionCategories : [];
+        setBusiness({ ...business, expansionCategories });
+        setContextDirty(false);
+        if (!expansionCategories.length) {
+          setOpportunityError("No opportunity passed the website-evidence threshold. Try a website with more detailed product and customer information.");
+        }
+        return;
       }
+      throw new Error("Opportunity discovery is still running after 4 minutes. Please retry.");
     } catch (error) {
       setOpportunityError(error instanceof Error ? error.message : "Opportunity discovery failed");
     } finally {

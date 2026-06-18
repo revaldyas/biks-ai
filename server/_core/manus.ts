@@ -188,21 +188,29 @@ export async function startManusTask(
   if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
 
   const hdrs = { "Content-Type": "application/json", "x-manus-api-key": apiKey };
-  const createRes = await fetch(`${BASE}/task.create`, {
-    method: "POST",
-    headers: hdrs,
-    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema, agent_profile: options.profile || AGENT_PROFILE }),
-  });
+  for (const useStructuredOutput of [true, false]) {
+    const createRes = await fetch(`${BASE}/task.create`, {
+      method: "POST",
+      headers: hdrs,
+      body: JSON.stringify({
+        message: { content: prompt },
+        ...(useStructuredOutput ? { structured_output_schema: schema } : {}),
+        agent_profile: options.profile || AGENT_PROFILE,
+      }),
+    });
 
-  if (!createRes.ok) {
+    if (createRes.ok) {
+      const created: any = await createRes.json();
+      if (created.ok) return created.task_id as string;
+      throw new Error(`Manus: ${created.error?.message ?? "task.create error"}`);
+    }
+
     const txt = await createRes.text().catch(() => "");
-    throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
+    const canFallback = useStructuredOutput && createRes.status === 400 && /invalid_argument|structured|unexpected error/i.test(txt);
+    if (!canFallback) throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
   }
 
-  const created: any = await createRes.json();
-  if (!created.ok) throw new Error(`Manus: ${created.error?.message ?? "task.create error"}`);
-
-  return created.task_id as string;
+  throw new Error("Manus task.create failed after schema fallback");
 }
 
 export type ManusTaskStatus =

@@ -416,10 +416,11 @@ ${JSON.stringify({ companyName: business.companyName, website: business.website,
 Generate 1-3 genuinely adjacent, non-obvious markets only when supported. Return fewer or zero rather than inventing weak opportunities.
 For every market, link it to a transferable seller capability and concrete buyer pain. Define at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably use or need the seller's offering. Each prerequisite must include specific acceptable website signals, the linked seller capability, its source, supporting source evidence, and confidence. Use only the website-derived capability model and website evidence. Search queries must be location-free, target organizations rather than articles, and include concrete prerequisite signals. Never put a city or country in a base query. Disqualifiers must be concrete. Avoid broad labels whose members commonly lack the mandatory prerequisite.
 
-Return JSON with an expansionCategories array.`;
+Return JSON with an expansionCategories array. Even if structured output is unavailable, use these exact field names:
+{"expansionCategories":[{"name":"","whyRelevant":"","whyNonObvious":"","sharedPain":"","salesAngle":"","painPoints":[""],"disqualifiers":[""],"confidence":0,"searchQueries":[""],"mustHaveEvidence":[{"requirement":"","acceptableSignals":[""],"sellerCapability":"","sourceType":"website","sourceEvidence":"","confidence":0}]}]}`;
 
   try {
-    const generated = await manusTask<any>(prompt, {
+    const taskId = await startManusTask(prompt, {
       type: "object",
       properties: {
         expansionCategories: {
@@ -443,21 +444,87 @@ Return JSON with an expansionCategories array.`;
         },
       },
       required: ["expansionCategories"], additionalProperties: false,
-    }, { timeoutMs: 120_000, pollMs: 2_000, profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
-
-    const categories = (Array.isArray(generated?.expansionCategories) ? generated.expansionCategories : [])
-      .filter((category: any) => Number(category.confidence) >= 60)
-      .map((category: any) => {
-        const mustHaveEvidence = (Array.isArray(category.mustHaveEvidence) ? category.mustHaveEvidence : [])
-          .filter((item: any) => item?.requirement && item?.sellerCapability && item?.sourceType === "website" && item?.sourceEvidence && Array.isArray(item.acceptableSignals) && item.acceptableSignals.filter(Boolean).length > 0 && Number(item.confidence) >= 60)
-          .map((item: any) => ({ ...item, acceptableSignals: item.acceptableSignals.map((signal: any) => String(signal).trim()).filter(Boolean) }));
-        return { ...category, mustHaveEvidence, requiredEvidence: mustHaveEvidence.map((item: any) => item.requirement), searchQueries: (Array.isArray(category.searchQueries) ? category.searchQueries : []).map((query: any) => String(query).trim()).filter(Boolean).slice(0, 8), contextApplied: ["website capability model", "website evidence"], memoriesUsed: [] };
-      })
-      .filter((category: any) => category.mustHaveEvidence.length > 0 && category.searchQueries.length > 0)
-      .slice(0, 3);
-    return res.json({ expansionCategories: categories, contextApplied: "website capability model" });
+    }, { profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
+    return res.json({ taskId });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Opportunity generation failed" });
+  }
+});
+
+const opportunityConfidence = (category: any) => {
+  const numeric = Number(category?.confidence);
+  if (Number.isFinite(numeric)) return numeric <= 1 ? numeric * 100 : numeric;
+  const label = String(category?.opportunityStrength || "").toUpperCase();
+  if (label === "HIGH") return 85;
+  if (label.includes("MEDIUM-HIGH")) return 75;
+  if (label.includes("MEDIUM")) return 65;
+  return 0;
+};
+
+export const normalizeOpportunityResult = (generated: any) => (Array.isArray(generated?.expansionCategories) ? generated.expansionCategories : [])
+  .filter((category: any) => opportunityConfidence(category) >= 60)
+  .map((category: any) => {
+    const transferable = category?.transferableCapability || {};
+    const capabilityEvidence = Array.isArray(transferable?.sourceEvidence)
+      ? transferable.sourceEvidence.map((item: any) => item?.quote || item?.claim).filter(Boolean).join("; ")
+      : String(transferable?.sourceEvidence || "");
+    const prerequisiteSource = Array.isArray(category.mustHaveEvidence)
+      ? category.mustHaveEvidence
+      : (Array.isArray(category.mandatoryBuyerPrerequisites) ? category.mandatoryBuyerPrerequisites : []);
+    const mustHaveEvidence = prerequisiteSource
+      .map((item: any) => {
+        const rawConfidence = Number(item?.confidence);
+        return {
+          requirement: String(item?.requirement || item?.prerequisiteLabel || "").trim(),
+          acceptableSignals: (Array.isArray(item?.acceptableSignals) ? item.acceptableSignals : item?.acceptableWebsiteSignals || []).map((signal: any) => String(signal).trim()).filter(Boolean),
+          sellerCapability: String(item?.sellerCapability || transferable?.capability || "").trim(),
+          sourceType: "website" as const,
+          sourceEvidence: String(item?.sourceEvidence || capabilityEvidence || transferable?.capabilitySource || "").trim(),
+          confidence: Number.isFinite(rawConfidence) ? (rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence) : opportunityConfidence(category),
+        };
+      })
+      .filter((item: any) => item.requirement && item.sellerCapability && item.sourceEvidence && item.acceptableSignals.length > 0 && item.confidence >= 60);
+    const painPoints = (Array.isArray(category.painPoints) ? category.painPoints : category.buyerPains || [])
+      .map((pain: any) => String(typeof pain === "string" ? pain : pain?.pain || "").trim()).filter(Boolean);
+    const disqualifiers = Array.from(new Set([
+      ...(Array.isArray(category.disqualifiers) ? category.disqualifiers : []),
+      ...prerequisiteSource.flatMap((item: any) => Array.isArray(item?.disqualifyingSignals) ? item.disqualifyingSignals : []),
+    ].map((value: any) => String(value).trim()).filter(Boolean)));
+    const searchQueries = (Array.isArray(category.searchQueries) ? category.searchQueries : category.suggestedSearchQueries || [])
+      .map((query: any) => String(query).trim()).filter(Boolean).slice(0, 8);
+    return {
+      ...category,
+      name: String(category.name || category.marketLabel || "").trim(),
+      whyRelevant: String(category.whyRelevant || category.marketDescription || category.adjacencyRationale || "").trim(),
+      whyNonObvious: String(category.whyNonObvious || category.adjacencyRationale || "").trim(),
+      sharedPain: String(category.sharedPain || painPoints[0] || "").trim(),
+      salesAngle: String(category.salesAngle || transferable?.capability || "").trim(),
+      painPoints,
+      disqualifiers,
+      confidence: opportunityConfidence(category),
+      mustHaveEvidence,
+      requiredEvidence: mustHaveEvidence.map((item: any) => item.requirement),
+      searchQueries,
+      contextApplied: ["website capability model", "website evidence"],
+      memoriesUsed: [],
+    };
+  })
+  .filter((category: any) => category.name && category.mustHaveEvidence.length > 0 && category.searchQueries.length > 0)
+  .slice(0, 3);
+
+api.get("/api/poll-opportunities", async (req: Request, res: Response) => {
+  const { id } = req.query;
+  if (!id || typeof id !== "string") return res.status(400).json({ error: "id is required" });
+  try {
+    const status = await checkManusTask(id);
+    if (status.status !== "done") return res.json(status);
+    return res.json({
+      status: "done",
+      expansionCategories: normalizeOpportunityResult(status.result),
+      contextApplied: "website capability model",
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Opportunity polling failed" });
   }
 });
 
