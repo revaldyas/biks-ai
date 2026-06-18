@@ -6,6 +6,7 @@ import {
   verifyRequestUser,
   type SupabaseUser,
 } from "./_core/supabaseAuth";
+import { lowQualitySourceReason, selectStrongestQueries } from "./leadDiscovery";
 
 const api = Router();
 
@@ -412,12 +413,12 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
 // ============================================================
 api.post("/api/exa-search", async (req: Request, res: Response) => {
   const { query, queries, city, numResults = 5, business, category, memories = [] } = req.body;
-  const baseQueries = Array.from(new Set(
+  const candidateQueries = Array.from(new Set(
     (Array.isArray(queries) ? queries : [query])
       .map((q: any) => String(q || "").trim())
       .filter(Boolean)
   ));
-  if (baseQueries.length === 0) {
+  if (candidateQueries.length === 0) {
     return res.status(400).json({ error: "query is required" });
   }
 
@@ -458,19 +459,34 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       ...(business?.capabilityModel?.buyerPains || []),
       ...(business?.capabilityModel?.requiredBuyerConditions || []),
     ].filter(Boolean).slice(0, 12);
+    const selectedQueries = selectStrongestQueries(candidateQueries, {
+      memories: memoryTexts,
+      requiredEvidence,
+      capabilities: capabilityBits,
+      opportunity: [
+        category?.name,
+        category?.whyRelevant,
+        category?.whyNonObvious,
+        category?.sharedPain,
+        ...(Array.isArray(category?.painPoints) ? category.painPoints : []),
+      ].filter(Boolean),
+    });
+    console.log(`[exa-search] selected queries: ${JSON.stringify(selectedQueries)}`);
+    const baseQueries = selectedQueries.map(item => item.query);
     const contextSuffix = [
       memoryContext ? `business preferences: ${memoryContext}` : "",
       requiredEvidence.length ? `must show: ${requiredEvidence.join(", ")}` : "",
       capabilityBits.length ? `seller capability fit: ${capabilityBits.join(", ")}` : "",
     ].filter(Boolean).join(" ");
+    const useCountryDomains = meta.domains.length > 0 && meta.domains[0] !== ".com";
     const searchQueries = Array.from(new Set(
       baseQueries.flatMap((q) => {
         const scoped = city ? `${q} in ${city}` : q;
         const located = city ? `${q} located in ${city}, ${meta.country}` : q;
         const contextual = contextSuffix ? `${scoped} ${contextSuffix}` : scoped;
-        return [scoped, located, contextual];
+        return useCountryDomains ? [scoped, contextual] : [scoped, located, contextual];
       })
-    )).slice(0, 12);
+    ));
 
     const fetchExa = async (q: string, includeDomains?: string[]) => {
       const body: any = {
@@ -501,7 +517,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     // when present; capability-derived queries remain the fallback when it is not.
     const resultSets = await Promise.all([
       ...searchQueries.map((q) => fetchExa(q)),
-      ...(meta.domains.length > 0 && meta.domains[0] !== ".com"
+      ...(useCountryDomains
         ? baseQueries.map((q) => fetchExa(q, meta.domains))
         : []),
     ]);
@@ -578,7 +594,12 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       .flatMap(([, v]) => v)
       .filter(n => !ownNames.includes(n));
 
-    let results = allResults;
+    let results = allResults.filter((r: any) => {
+      const reason = lowQualitySourceReason(r.url, r.title);
+      if (!reason) return true;
+      console.log(`[exa-search] DROP "${r.title}" (${r._host}) reason: ${reason}`);
+      return false;
+    });
     let drops = 0;
     if (city) {
       console.log(`[exa-search] city="${city}" country="${meta.country}" raw merged=${allResults.length}`);
@@ -635,7 +656,6 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       if (evidenceHits.length) score += 1;
       if (capabilityHits.length) score += 1;
       if (memoryContext && memoryTexts.some((m: string) => text.includes(m.toLowerCase().split(/\s+/).find(w => w.length > 5) || "__none__"))) score += 1;
-      if (/directory|blog|article|news|list of|top \d+/i.test(r.url || "")) score -= 1;
       if (disqHits.length) score -= 2;
       return {
         ...r,
@@ -655,6 +675,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
 
     const heuristicResults = results.map(scoreHeuristic);
 
+    let validationStatus: "manus" | "heuristic" | "failed" = "heuristic";
     try {
       if (process.env.MANUS_API_KEY && heuristicResults.length > 0) {
         const validationPrompt = `You are validating B2B lead search results before they are shown to a user.
@@ -683,7 +704,18 @@ ${heuristicResults.slice(0, Math.max(numResults * 2, 12)).map((r: any, i: number
   pageText: String(r._pageText || "").slice(0, 1200),
 })}`).join("\n")}
 
-Return ONLY valid JSON. Validate that each lead is a real operating company, in the correct location, relevant to the selected opportunity, and supported by evidence. Reject or score low if it is a directory/blog/article, wrong country/city, not operating, lacks required buyer condition, or only keyword-adjacent.`;
+Return ONLY valid JSON. Validate that each lead is a real operating company, in the correct location, relevant to the selected opportunity, and supported by evidence.
+
+For every candidate set these verification fields explicitly:
+- isRealCompany: the evidence identifies a specific legal or trading business.
+- isOperating: the page contains current services, contact, booking, location, or other evidence that it still operates.
+- locationVerified: the supplied page evidence verifies the requested city/country, not merely a service area or query-generated summary.
+- isPrimaryCompanySource: the URL is the company's own website, not a directory, social profile, article, or aggregator.
+- requiredEvidenceVerified: page evidence satisfies at least one required buyer condition; use true when no required evidence was supplied.
+- rejectReason: concise reason when any verification field is false, otherwise an empty string.
+- disqualifiers: concrete disqualifying evidence; return an empty array only when none is present.
+
+Only return candidate URLs supplied above. Do not invent or substitute URLs. Mark unverifiable claims false. Reject or score low if a result is a directory/blog/article, wrong country/city, not operating, lacks a required buyer condition, or is only keyword-adjacent.`;
 
         const validated = await manusTask<any>(validationPrompt, {
           type: "object",
@@ -702,8 +734,14 @@ Return ONLY valid JSON. Validate that each lead is a real operating company, in 
                   disqualifiers: { type: "array", items: { type: "string" } },
                   contextApplied: { type: "array", items: { type: "string" } },
                   memoriesUsed: { type: "array", items: { type: "string" } },
+                  isRealCompany: { type: "boolean" },
+                  isOperating: { type: "boolean" },
+                  locationVerified: { type: "boolean" },
+                  isPrimaryCompanySource: { type: "boolean" },
+                  requiredEvidenceVerified: { type: "boolean" },
+                  rejectReason: { type: "string" },
                 },
-                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed"],
+                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed", "isRealCompany", "isOperating", "locationVerified", "isPrimaryCompanySource", "requiredEvidenceVerified", "rejectReason"],
                 additionalProperties: false,
               },
             },
@@ -712,27 +750,56 @@ Return ONLY valid JSON. Validate that each lead is a real operating company, in 
           additionalProperties: false,
         }, { timeoutMs: 90_000, pollMs: 2_000 });
 
-        const byUrl = new Map(heuristicResults.map((r: any) => [String(r.url || "").toLowerCase(), r]));
+        const candidateKey = (value: string) => String(value || "").toLowerCase().replace(/\/$/, "");
+        const byUrl = new Map(heuristicResults.map((r: any) => [candidateKey(r.url), r]));
         results = (validated.results || [])
-          .map((v: any) => ({ ...(byUrl.get(String(v.url || "").toLowerCase()) || {}), ...v }))
-          .filter((r: any) => r.url)
+          .filter((v: any) => byUrl.has(candidateKey(v.url)))
+          .map((v: any) => ({ ...byUrl.get(candidateKey(v.url)), ...v }))
+          .filter((r: any) =>
+            r.isRealCompany &&
+            r.isOperating &&
+            (!city || r.locationVerified) &&
+            r.isPrimaryCompanySource &&
+            (!requiredEvidence.length || r.requiredEvidenceVerified) &&
+            (!Array.isArray(r.disqualifiers) || r.disqualifiers.length === 0) &&
+            String(r.evidence || "").trim().length >= 20 &&
+            r.fitScore >= 3
+          )
           .sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+        validationStatus = "manus";
       } else {
         results = heuristicResults.sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
       }
     } catch (e: any) {
-      console.warn("[exa-search] Manus validation failed; using heuristic ranking:", e?.message);
-      results = heuristicResults.sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+      console.warn("[exa-search] Manus validation failed; withholding unverified leads:", e?.message);
+      validationStatus = "failed";
+      results = [];
     }
 
     // Remove internal fields before returning
     results = results.slice(0, numResults).map(({ _fullText, _pageText, _url, _host, ...rest }: any) => rest);
 
     if (results.length === 0 && city) {
-      return res.json({ results: [], message: `No companies found specifically in ${city}. Try a different category or city.` });
+      return res.json({
+        results: [],
+        message: validationStatus === "failed"
+          ? "Lead validation is temporarily unavailable. No unverified leads were shown."
+          : `No verified companies found specifically in ${city}. Try a different category or city.`,
+        querySelection: selectedQueries,
+        exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
+        validationStatus,
+      });
     }
 
-    return res.json({ results });
+    return res.json({
+      results,
+      querySelection: selectedQueries.map(item => ({
+        ...item,
+        contextApplied: memoryTexts.length ? ["mem0", "required evidence", "capability model"] : ["required evidence", "capability model fallback"],
+      })),
+      exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
+      validationStatus,
+    });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
