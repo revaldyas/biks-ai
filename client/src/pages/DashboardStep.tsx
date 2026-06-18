@@ -83,7 +83,7 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
       if (!data.taskId) throw new Error("Opportunity task did not start");
 
       const startedAt = Date.now();
-      while (Date.now() - startedAt < 240_000) {
+      while (Date.now() - startedAt < 360_000) {
         await new Promise(resolve => setTimeout(resolve, 3_000));
         const pollResponse = await apiFetch(`/api/poll-opportunities?id=${encodeURIComponent(data.taskId)}`);
         const status = await pollResponse.json();
@@ -99,7 +99,7 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
         }
         return;
       }
-      throw new Error("Opportunity discovery is still running after 4 minutes. Please retry.");
+      throw new Error("Opportunity discovery is still running after 6 minutes. Please retry.");
     } catch (error) {
       setOpportunityError(error instanceof Error ? error.message : "Opportunity discovery failed");
     } finally {
