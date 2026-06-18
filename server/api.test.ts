@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
 import apiRoutes from "./api";
@@ -144,6 +144,72 @@ describe("API route handlers", () => {
       expect(data.error).toBe("leadName is required");
     } finally {
       close();
+    }
+  });
+
+  it("POST /api/exa-search selects four strong queries and filters directory results", async () => {
+    const origExa = process.env.EXA_API_KEY;
+    const origManus = process.env.MANUS_API_KEY;
+    process.env.EXA_API_KEY = "test-exa-key";
+    delete process.env.MANUS_API_KEY;
+    const originalFetch = globalThis.fetch;
+    const exaRequests: any[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      if (String(input).startsWith("https://api.exa.ai/search")) {
+        exaRequests.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({
+          results: [
+            { title: "Example Recovery Club", url: "https://recovery.example.com", text: "Premium recovery club with visible cold plunge facilities and current booking information.", summary: "Operating premium recovery club." },
+            { title: "Top 10 Recovery Clubs", url: "https://www.yelp.com/biz/recovery", text: "Directory listing", summary: "Directory listing" },
+          ],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return originalFetch(input, init);
+    });
+
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+
+    try {
+      const res = await fetch(`http://localhost:${port}/api/exa-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queries: [
+            "wellness businesses",
+            "premium recovery clubs with cold plunge facilities",
+            "luxury hotels",
+            "small fitness studios",
+            "recovery centers requiring low chemical water treatment",
+            "sports performance facilities",
+          ],
+          memories: ["Prioritize premium buyers and avoid small operators"],
+          category: {
+            name: "Recovery centers",
+            requiredEvidence: ["visible cold plunge facilities"],
+            disqualifiers: ["directory"],
+          },
+          business: {
+            capabilityModel: { capabilities: ["low chemical water treatment"] },
+          },
+        }),
+      });
+      const data = await res.json();
+      expect(data.querySelection).toHaveLength(4);
+      expect(data.querySelection[0].contextApplied).toContain("mem0");
+      expect(data.querySelection.map((item: any) => item.query)).not.toContain(
+        "small fitness studios"
+      );
+      expect(data.exaRequestCount).toBeLessThanOrEqual(12);
+      expect(exaRequests).toHaveLength(data.exaRequestCount);
+      expect(data.results.map((result: any) => result.url)).toEqual(["https://recovery.example.com"]);
+    } finally {
+      close();
+      fetchSpy.mockRestore();
+      if (origExa) process.env.EXA_API_KEY = origExa;
+      else delete process.env.EXA_API_KEY;
+      if (origManus) process.env.MANUS_API_KEY = origManus;
+      else delete process.env.MANUS_API_KEY;
     }
   });
 
