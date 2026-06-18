@@ -41,7 +41,7 @@ function overlap(queryTokens: Set<string>, values: string[]): string[] {
   return Array.from(matches);
 }
 
-function splitMemoryPolarity(memories: string[], protectedValues: string[]) {
+export function splitMemoryPolarity(memories: string[], protectedValues: string[] = []) {
   const positive: string[] = [];
   const negative: string[] = [];
   const negativeMarker = /\b(avoid|deprioritize|exclude|reject|never|not|without)\b/i;
@@ -59,6 +59,25 @@ function splitMemoryPolarity(memories: string[], protectedValues: string[]) {
     .flatMap(tokens)
     .filter(token => !negativeMarker.test(token) && !protectedTokens.has(token));
   return { positive, negativeTokens };
+}
+
+export function stripLocationTerms(query: string, locations: string[]): string {
+  let cleaned = String(query || "");
+  for (const location of locations.filter(Boolean).sort((a, b) => b.length - a.length)) {
+    cleaned = cleaned.replace(new RegExp(`\\b(?:in|near|around|located in)?\\s*${location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), " ");
+  }
+  return cleaned.replace(/\s+/g, " ").replace(/[,;-]+\s*$/, "").trim();
+}
+
+export function matchMandatoryEvidence(pageText: string, signals: string[]): string[] {
+  const normalized = String(pageText || "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ");
+  return Array.from(new Set(signals.filter(signal => {
+    const words = tokens(signal);
+    if (!words.length) return false;
+    const exact = normalized.includes(String(signal).toLowerCase().replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim());
+    const overlapCount = words.filter(word => normalized.includes(word)).length;
+    return exact || overlapCount >= Math.ceil(words.length * 0.75);
+  })));
 }
 
 export interface QuerySelectionContext {

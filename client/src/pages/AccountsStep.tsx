@@ -16,7 +16,6 @@ interface Props {
   onBack: () => void;
   initialCategory?: number;
 }
-
 export default function AccountsStep({
   business, memories, setMemories, leads, setLeads, contacts, setContacts, onSelectLead, onBack, initialCategory = 0
 }: Props) {
@@ -25,6 +24,7 @@ export default function AccountsStep({
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
+  const [searchAudit, setSearchAudit] = useState<{ queries: string[]; rejectedCount: number; validationStatus?: string } | null>(null);
 
   const cityOptions = [
     "Singapore",
@@ -49,15 +49,16 @@ export default function AccountsStep({
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
     const queries = cat.searchQueries?.length ? cat.searchQueries : [`${cat.name} premium`];
-    const query = `${queries[0]} in ${city}`;
 
     try {
       setSearchMessage("");
+      setSearchAudit(null);
+      setLeads([]);
       const res = await apiFetch("/api/exa-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query,
+          query: queries[0],
           queries,
           city,
           numResults: 8,
@@ -67,22 +68,32 @@ export default function AccountsStep({
         }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Lead search failed");
       if (data.message) {
         setSearchMessage(data.message);
       }
+      setSearchAudit({
+        queries: Array.isArray(data.querySelection)
+          ? data.querySelection.map((item: any) => item.query).filter(Boolean)
+          : [],
+        rejectedCount: data.rejectedCount || 0,
+        validationStatus: data.validationStatus,
+      });
       const scored = (data.results || []).map((r: any) => ({
         ...r,
         name: r.title,
         email: r.email || null,
         linkedinUrl: r.linkedinUrl || null,
-        fitScore: r.fitScore || scoreResult(r, cat.name, city, memories),
+        fitScore: Number.isFinite(r.fitScore) ? r.fitScore : 1,
         category: cat.name,
         city,
         status: "pending" as const,
       }));
       scored.sort((a: Lead, b: Lead) => b.fitScore - a.fitScore);
       setLeads(scored);
-    } catch {}
+    } catch (error) {
+      setSearchMessage(error instanceof Error ? error.message : "Lead search failed");
+    }
     setSearching(false);
   };
 
@@ -104,16 +115,12 @@ export default function AccountsStep({
       }
     } catch {}
 
-    const reScored = updated.map(l => ({
-      ...l,
-      fitScore: l.status === "rejected" ? l.fitScore : scoreResult(l, l.category, l.city, [...memories, { id: "tmp", text: rejectReason }]),
-    }));
-    reScored.sort((a, b) => {
+    updated.sort((a, b) => {
       if (a.status === "rejected" && b.status !== "rejected") return 1;
       if (b.status === "rejected" && a.status !== "rejected") return -1;
       return b.fitScore - a.fitScore;
     });
-    setLeads(reScored);
+    setLeads(updated);
     setRejectModal(null);
     setRejectReason("");
   };
@@ -241,6 +248,11 @@ export default function AccountsStep({
           <p style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>
             Selected market: {business.expansionCategories[selectedCategory]?.name} · {city}
           </p>
+          {searchAudit && (
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              {searchAudit.queries.length} selected queries · {searchAudit.rejectedCount} candidates rejected · {searchAudit.validationStatus || "validated"}
+            </div>
+          )}
         </div>
 
         {/* Leads */}
@@ -287,9 +299,9 @@ export default function AccountsStep({
                     <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {lead.name}
                     </span>
-                    {lead.city && (
+                    {lead.verifiedAddress && (
                       <span style={{ fontSize: 10, color: "var(--ink-3)", background: "var(--surface-sunk)", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
-                        📍 {lead.city}
+                        {lead.verifiedAddress}
                       </span>
                     )}
                     <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--ink-3)", textDecoration: "none" }}>
@@ -306,10 +318,15 @@ export default function AccountsStep({
                   </div>
                   <div style={fieldLabel}>Evidence</div>
                   <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
-                    {(lead.evidence || lead.summary)
-                      ? `${(lead.evidence || lead.summary).slice(0, 220)}${(lead.evidence || lead.summary).length > 220 ? "..." : ""}`
+                    {(lead.evidenceQuote || lead.evidence || lead.summary)
+                      ? `${(lead.evidenceQuote || lead.evidence || lead.summary).slice(0, 220)}${(lead.evidenceQuote || lead.evidence || lead.summary).length > 220 ? "..." : ""}`
                       : "No evidence text available."}
                   </div>
+                  {lead.evidenceUrl && (
+                    <a href={lead.evidenceUrl} target="_blank" rel="noopener" style={{ display: "inline-block", marginTop: 5, fontSize: 11, color: "var(--sage-strong)" }}>
+                      View source evidence
+                    </a>
+                  )}
                   {lead.whyThisCompanyFits && (
                     <>
                       <div style={{ ...fieldLabel, marginTop: 10 }}>Why It Fits</div>
@@ -335,7 +352,7 @@ export default function AccountsStep({
                     Relevance
                     <Tooltip text="How well this lead fits, based on segment, location, and your saved preferences. High / Medium / Low." />
                   </div>
-                  <RelevanceBadge label={getRelevanceLabel(lead.fitScore)} />
+                  <RelevanceBadge label={getRelevanceLabel(lead.fitScore, lead.eligibilityPass)} />
 
                   <div style={{ ...fieldLabel, marginTop: 12, display: "flex", alignItems: "center" }}>
                     Decision
@@ -426,13 +443,13 @@ export default function AccountsStep({
     </div>
   );
 }
-
 const fieldLabel: CSSProperties = {
   fontSize: 9, fontWeight: 700, fontFamily: "var(--font-mono)",
   letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-4)",
 };
 
-const getRelevanceLabel = (score: number): "High" | "Medium" | "Low" => {
+const getRelevanceLabel = (score: number, eligibilityPass?: boolean): "High" | "Medium" | "Low" => {
+  if (!eligibilityPass) return "Low";
   if (score >= 4) return "High";
   if (score === 3) return "Medium";
   return "Low";
@@ -453,21 +470,4 @@ function RelevanceBadge({ label }: { label: "High" | "Medium" | "Low" }) {
       {label}
     </span>
   );
-}
-
-function scoreResult(result: any, category: string, city: string, memories: any[]): number {
-  let score = 0;
-  const text = ((result.title || result.name || "") + " " + (result.url || "") + " " + (result.highlights?.join(" ") || "") + " " + (result.summary || "")).toLowerCase();
-
-  if (text.includes(city.toLowerCase())) score += 1;
-  if (["cold plunge", "wellness", "spa", "pool", "sauna", "recovery", "hydrotherapy"].some(k => text.includes(k))) score += 1;
-  if (["premium", "luxury", "boutique", "members"].some(k => text.includes(k))) score += 1;
-  if (!(result.url || "").includes("blog") && !(result.url || "").includes("directory")) score += 1;
-  if (["gym", "fitness", "studio", "club", "resort", "hotel"].some(k => text.includes(k))) score += 1;
-
-  const memTexts = memories.map((m: any) => (typeof m === "string" ? m : m.text || "").toLowerCase());
-  const avoidSmall = memTexts.some(m => m.includes("deprioritize") || m.includes("avoid") || m.includes("small"));
-  if (avoidSmall && text.includes("boutique") && !text.includes("pool")) score -= 1;
-
-  return Math.max(1, Math.min(5, score));
 }

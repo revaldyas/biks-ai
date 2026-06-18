@@ -6,7 +6,7 @@ import {
   verifyRequestUser,
   type SupabaseUser,
 } from "./_core/supabaseAuth";
-import { lowQualitySourceReason, selectStrongestQueries } from "./leadDiscovery";
+import { lowQualitySourceReason, matchMandatoryEvidence, selectStrongestQueries, splitMemoryPolarity, stripLocationTerms } from "./leadDiscovery";
 
 const api = Router();
 
@@ -173,6 +173,9 @@ Return ONLY valid JSON (no markdown) with this structure:
   ],
   "products": ["Product/service 1", "Product 2"],
   "proofPoints": ["Credibility indicator 1", "Indicator 2"],
+  "websiteEvidence": [
+    { "claim": "A source-supported business fact", "quote": "Exact short quote from the supplied website text", "sourceUrl": "${url}" }
+  ],
   "capabilityModel": {
     "capabilities": ["What the company can uniquely do"],
     "outcomes": ["Measurable or observable buyer outcomes"],
@@ -181,16 +184,13 @@ Return ONLY valid JSON (no markdown) with this structure:
     "currentMarkets": ["Markets already served, if visible"],
     "proofPoints": ["Source-supported proof or credibility"],
     "disqualifiers": ["Signals that make a prospect irrelevant"]
-  },
-  "expansionCategories": [
-    { "name": "Clean 2-5 word market label, no '&'", "whyRelevant": "20-36 words: why this adjacent segment fits and its specific pain.", "whyNonObvious": "Why this is outside the obvious/current customer base.", "sharedPain": "The same underlying pain in this new market.", "salesAngle": "One-sentence pitch angle", "painPoints": ["Pain 1", "Pain 2"], "requiredEvidence": ["Evidence a lead must show"], "disqualifiers": ["Signals to reject/score low"], "confidence": 0-100, "searchQueries": ["5-10 account-search queries for this segment and the company's city"] }
-  ]
+  }
 }
 
 REQUIREMENTS:
 - valuePropositions: EXACTLY 3 (the strongest, source-supported).
 - customerSegments: 3-5. clientNames empty if none shown — never invent.
-- expansionCategories: EXACTLY 3 clean adjacent markets, findable via account search.
+- websiteEvidence: 3-10 concise facts with exact supporting quotes. Never paraphrase the quote.
 - currentSegments = the customerSegments labels (kept for backward compatibility).`;
 
     const taskId = await startManusTask(prompt, {
@@ -221,6 +221,19 @@ REQUIREMENTS:
         },
         products: { type: "array", items: { type: "string" } },
         proofPoints: { type: "array", items: { type: "string" } },
+        websiteEvidence: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              claim: { type: "string" },
+              quote: { type: "string" },
+              sourceUrl: { type: "string" },
+            },
+            required: ["claim", "quote", "sourceUrl"],
+            additionalProperties: false,
+          },
+        },
         capabilityModel: {
           type: "object",
           properties: {
@@ -235,30 +248,10 @@ REQUIREMENTS:
           required: ["capabilities", "outcomes", "buyerPains", "requiredBuyerConditions", "currentMarkets", "proofPoints", "disqualifiers"],
           additionalProperties: false,
         },
-        expansionCategories: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              whyRelevant: { type: "string" },
-              whyNonObvious: { type: "string" },
-              sharedPain: { type: "string" },
-              salesAngle: { type: "string" },
-              painPoints: { type: "array", items: { type: "string" } },
-              requiredEvidence: { type: "array", items: { type: "string" } },
-              disqualifiers: { type: "array", items: { type: "string" } },
-              confidence: { type: "number" },
-              searchQueries: { type: "array", items: { type: "string" } },
-            },
-            required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "requiredEvidence", "disqualifiers", "confidence", "searchQueries"],
-            additionalProperties: false,
-          },
-        },
       },
-      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "capabilityModel", "expansionCategories"],
+      required: ["companyName", "website", "summary", "valueProposition", "valuePropositions", "currentSegments", "customerSegments", "products", "proofPoints", "websiteEvidence", "capabilityModel"],
       additionalProperties: false,
-    });
+    }, { profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
 
     return res.json({ taskId });
   } catch (e: any) {
@@ -411,6 +404,67 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
 // ============================================================
 // POST /api/exa-search — Lead discovery via Exa
 // ============================================================
+api.post("/api/generate-opportunities", async (req: Request, res: Response) => {
+  const { business, memories = [] } = req.body;
+  if (!business?.companyName || !business?.capabilityModel) return res.status(400).json({ error: "business capability profile is required" });
+
+  const memoryTexts = (Array.isArray(memories) ? memories : []).map((memory: any) => String(typeof memory === "string" ? memory : memory?.text || "").trim()).filter(Boolean);
+  const prompt = `You are the opportunity-reasoning layer for an industry-agnostic B2B sales product.
+
+Seller profile extracted from its website:
+${JSON.stringify({ companyName: business.companyName, website: business.website, products: business.products, valuePropositions: business.valuePropositions, capabilityModel: business.capabilityModel, websiteEvidence: business.websiteEvidence }, null, 2)}
+
+Business context supplied by the user through mem0 (highest priority when present):
+${memoryTexts.length ? memoryTexts.map((memory: string, index: number) => `${index + 1}. ${memory}`).join("\n") : "None. Use the website-derived capability fallback."}
+
+Generate 1-3 genuinely adjacent, non-obvious markets only when supported. Return fewer or zero rather than inventing weak opportunities.
+For every market, link it to a transferable seller capability and concrete buyer pain. Define at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably use or need the seller's offering. Each prerequisite must include specific acceptable website signals, the linked seller capability, its source, supporting source evidence, and confidence. User context may prioritize or exclude opportunities, but may not manufacture unsupported seller capabilities. Search queries must be location-free, target organizations rather than articles, and include concrete prerequisite signals. Never put a city or country in a base query. Disqualifiers must be concrete. Avoid broad labels whose members commonly lack the mandatory prerequisite.
+
+Return JSON with an expansionCategories array.`;
+
+  try {
+    const generated = await manusTask<any>(prompt, {
+      type: "object",
+      properties: {
+        expansionCategories: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" }, whyRelevant: { type: "string" }, whyNonObvious: { type: "string" }, sharedPain: { type: "string" }, salesAngle: { type: "string" },
+              painPoints: { type: "array", items: { type: "string" } }, disqualifiers: { type: "array", items: { type: "string" } }, confidence: { type: "number" }, searchQueries: { type: "array", items: { type: "string" } },
+              mustHaveEvidence: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { requirement: { type: "string" }, acceptableSignals: { type: "array", items: { type: "string" } }, sellerCapability: { type: "string" }, sourceType: { type: "string", enum: ["website", "memory"] }, sourceEvidence: { type: "string" }, confidence: { type: "number" } },
+                  required: ["requirement", "acceptableSignals", "sellerCapability", "sourceType", "sourceEvidence", "confidence"], additionalProperties: false,
+                },
+              },
+            },
+            required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "disqualifiers", "confidence", "searchQueries", "mustHaveEvidence"], additionalProperties: false,
+          },
+        },
+      },
+      required: ["expansionCategories"], additionalProperties: false,
+    }, { timeoutMs: 120_000, pollMs: 2_000, profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
+
+    const categories = (Array.isArray(generated?.expansionCategories) ? generated.expansionCategories : [])
+      .filter((category: any) => Number(category.confidence) >= 60)
+      .map((category: any) => {
+        const mustHaveEvidence = (Array.isArray(category.mustHaveEvidence) ? category.mustHaveEvidence : [])
+          .filter((item: any) => item?.requirement && item?.sellerCapability && item?.sourceEvidence && Array.isArray(item.acceptableSignals) && item.acceptableSignals.filter(Boolean).length > 0 && Number(item.confidence) >= 60)
+          .map((item: any) => ({ ...item, acceptableSignals: item.acceptableSignals.map((signal: any) => String(signal).trim()).filter(Boolean) }));
+        return { ...category, mustHaveEvidence, requiredEvidence: mustHaveEvidence.map((item: any) => item.requirement), searchQueries: (Array.isArray(category.searchQueries) ? category.searchQueries : []).map((query: any) => String(query).trim()).filter(Boolean).slice(0, 8), contextApplied: memoryTexts.length ? ["mem0", "website capabilities", "website evidence"] : ["website capability fallback", "website evidence"], memoriesUsed: memoryTexts };
+      })
+      .filter((category: any) => category.mustHaveEvidence.length > 0 && category.searchQueries.length > 0)
+      .slice(0, 3);
+    return res.json({ expansionCategories: categories, contextApplied: memoryTexts.length ? "mem0" : "website capability fallback" });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Opportunity generation failed" });
+  }
+});
+
 api.post("/api/exa-search", async (req: Request, res: Response) => {
   const { query, queries, city, numResults = 5, business, category, memories = [] } = req.body;
   const candidateQueries = Array.from(new Set(
@@ -450,18 +504,34 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     const memoryTexts = (Array.isArray(memories) ? memories : [])
       .map((m: any) => String(typeof m === "string" ? m : m?.text || ""))
       .filter(Boolean);
-    const memoryContext = memoryTexts.length ? memoryTexts.join("; ") : "";
-    const requiredEvidence = Array.isArray(category?.requiredEvidence) ? category.requiredEvidence : [];
-    const disqualifiers = Array.isArray(category?.disqualifiers) ? category.disqualifiers : [];
+    const prerequisiteItems = Array.isArray(category?.mustHaveEvidence) ? category.mustHaveEvidence : [];
+    const mandatorySignals = prerequisiteItems.flatMap((item: any) => Array.isArray(item?.acceptableSignals) ? item.acceptableSignals : []).map((signal: any) => String(signal).trim()).filter(Boolean);
+    const requiredEvidence = prerequisiteItems.length
+      ? prerequisiteItems.map((item: any) => String(item.requirement || "")).filter(Boolean)
+      : (Array.isArray(category?.requiredEvidence) ? category.requiredEvidence : []);
+    if (!mandatorySignals.length && !requiredEvidence.length) {
+      return res.status(400).json({ error: "Selected opportunity has no mandatory buyer prerequisites. Regenerate opportunities before searching." });
+    }
+    const memoryPolarity = splitMemoryPolarity(memoryTexts, [...requiredEvidence, ...mandatorySignals]);
+    const memoryContext = memoryPolarity.positive.join("; ");
+    const disqualifiers = [
+      ...(Array.isArray(category?.disqualifiers) ? category.disqualifiers : []),
+      ...memoryPolarity.negativeTokens,
+    ];
     const capabilityBits = [
       ...(business?.capabilityModel?.capabilities || []),
       ...(business?.capabilityModel?.outcomes || []),
       ...(business?.capabilityModel?.buyerPains || []),
       ...(business?.capabilityModel?.requiredBuyerConditions || []),
     ].filter(Boolean).slice(0, 12);
-    const selectedQueries = selectStrongestQueries(candidateQueries, {
+    const locationTerms = Array.from(new Set([
+      ...Object.keys(cityMeta),
+      ...Object.values(cityMeta).map(item => item.country),
+    ])).filter(Boolean);
+    const locationFreeQueries = candidateQueries.map(query => stripLocationTerms(query, locationTerms)).filter(Boolean);
+    const selectedQueries = selectStrongestQueries(locationFreeQueries, {
       memories: memoryTexts,
-      requiredEvidence,
+      requiredEvidence: [...requiredEvidence, ...mandatorySignals],
       capabilities: capabilityBits,
       opportunity: [
         category?.name,
@@ -474,8 +544,8 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     console.log(`[exa-search] selected queries: ${JSON.stringify(selectedQueries)}`);
     const baseQueries = selectedQueries.map(item => item.query);
     const contextSuffix = [
-      memoryContext ? `business preferences: ${memoryContext}` : "",
-      requiredEvidence.length ? `must show: ${requiredEvidence.join(", ")}` : "",
+      memoryContext ? `preferred buyer signals: ${memoryContext}` : "",
+      mandatorySignals.length ? `must show: ${mandatorySignals.join(", ")}` : (requiredEvidence.length ? `must show: ${requiredEvidence.join(", ")}` : ""),
       capabilityBits.length ? `seller capability fit: ${capabilityBits.join(", ")}` : "",
     ].filter(Boolean).join(" ");
     const useCountryDomains = meta.domains.length > 0 && meta.domains[0] !== ".com";
@@ -510,7 +580,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       });
       if (!r.ok) return [];
       const d: any = await r.json();
-      return d.results || [];
+      return (d.results || []).map((result: any) => ({ ...result, _searchQuery: q }));
     };
 
     // Run multiple opportunity queries in parallel. Memory context is prioritized
@@ -522,19 +592,25 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         : []),
     ]);
 
-    // Merge and deduplicate by URL
-    const seen = new Set<string>();
+    // Merge by company domain so one company cannot occupy several lead slots.
+    const hostOf = (u: string) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
+    const byCompany = new Map<string, any>();
     const merged: any[] = [];
     for (const r of resultSets.flat()) {
-      const url = (r.url || "").toLowerCase().replace(/\/$/, "");
-      if (!seen.has(url)) {
-        seen.add(url);
-        merged.push(r);
+      const key = hostOf(r.url || "") || (r.url || "").toLowerCase().replace(/\/$/, "");
+      const existing = byCompany.get(key);
+      if (!existing) {
+        const value = { ...r, _searchQueries: [r._searchQuery].filter(Boolean) };
+        byCompany.set(key, value);
+        merged.push(value);
+        continue;
       }
+      existing.text = [existing.text, r.text].filter(Boolean).join("\n").slice(0, 6000);
+      existing.highlights = Array.from(new Set([...(existing.highlights || []), ...(r.highlights || [])])).slice(0, 12);
+      existing._searchQueries = Array.from(new Set([...(existing._searchQueries || []), r._searchQuery].filter(Boolean)));
     }
 
     // Process results
-    const hostOf = (u: string) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ""; } };
     const allResults = merged.map((r: any) => {
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
@@ -552,6 +628,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         _pageText: [r.text || "", ...(r.highlights || [])].join(" "),
         _url: (r.url || "").toLowerCase(),
         _host: hostOf(r.url || ""),
+        _queryHits: Array.isArray(r._searchQueries) ? r._searchQueries.length : 1,
       };
     });
 
@@ -603,7 +680,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     let drops = 0;
     if (city) {
       console.log(`[exa-search] city="${city}" country="${meta.country}" raw merged=${allResults.length}`);
-      results = allResults.filter((r: any) => {
+      results = results.filter((r: any) => {
         const title = (r.title || "").toLowerCase();
         const host = r._host || "";
         const fullText = (r._fullText || "").toLowerCase();
@@ -647,23 +724,47 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
       console.log(`[exa-search] post-filter kept=${results.length} dropped=${drops}`);
     }
 
+    const eligibilityGroups: Array<{ requirement: string; signals: string[] }> = prerequisiteItems.length
+      ? prerequisiteItems.map((item: any) => ({
+          requirement: String(item.requirement || ""),
+          signals: (Array.isArray(item.acceptableSignals) ? item.acceptableSignals : []).map((signal: any) => String(signal)).filter(Boolean),
+        }))
+      : [{ requirement: "legacy required evidence", signals: requiredEvidence }];
+    if (eligibilityGroups.some(group => group.signals.length)) {
+      results = results.filter((result: any) => {
+        const groupMatches = eligibilityGroups.map(group => ({
+          requirement: group.requirement,
+          matches: matchMandatoryEvidence(result._pageText || "", group.signals),
+        }));
+        result._mandatoryMatches = groupMatches.flatMap(group => group.matches);
+        result._prerequisiteMatches = groupMatches;
+        if (groupMatches.every(group => group.matches.length > 0)) return true;
+        console.log(`[exa-search] DROP "${result.title}" (${result._host}) reason: mandatory buyer evidence not found`);
+        return false;
+      });
+    }
+
     const scoreHeuristic = (r: any) => {
-      const text = `${r.title || ""} ${r.summary || ""} ${(r.highlights || []).join(" ")} ${r._pageText || ""}`.toLowerCase();
-      let score = 2;
-      const evidenceHits = requiredEvidence.filter((e: string) => text.includes(String(e).toLowerCase()));
+      const text = `${r.title || ""} ${r.url || ""} ${r._pageText || ""}`.toLowerCase();
+      let score = 1;
+      const evidenceHits = Array.isArray(r._mandatoryMatches) ? r._mandatoryMatches : [];
       const capabilityHits = capabilityBits.filter((e: string) => text.includes(String(e).toLowerCase()));
       const disqHits = disqualifiers.filter((e: string) => text.includes(String(e).toLowerCase()));
-      if (evidenceHits.length) score += 1;
+      if (evidenceHits.length) score += 2;
       if (capabilityHits.length) score += 1;
-      if (memoryContext && memoryTexts.some((m: string) => text.includes(m.toLowerCase().split(/\s+/).find(w => w.length > 5) || "__none__"))) score += 1;
+      if ((r._queryHits || 0) > 1) score += 1;
       if (disqHits.length) score -= 2;
+      const evidenceQuote = String(r._pageText || "").replace(/\s+/g, " ").trim().slice(0, 500);
       return {
         ...r,
         fitScore: Math.max(1, Math.min(5, score)),
-        evidence: r.summary || r.highlights?.[0] || "Matched by Exa search and location filters.",
+        evidence: evidenceQuote || "No source-page evidence available.",
+        evidenceQuote,
+        evidenceUrl: r.url,
+        eligibilityPass: evidenceHits.length > 0,
         whyThisCompanyFits: evidenceHits.length
-          ? `Matches required evidence: ${evidenceHits.slice(0, 3).join(", ")}.`
-          : "Potential fit based on the selected opportunity and location-filtered company evidence.",
+          ? `Verified mandatory signals: ${evidenceHits.slice(0, 3).join(", ")}.`
+          : "Mandatory buyer evidence was not verified.",
         disqualifiers: disqHits,
         contextApplied: [
           ...(memoryContext ? ["mem0 business context"] : ["website capability fallback"]),
@@ -674,6 +775,9 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     };
 
     const heuristicResults = results.map(scoreHeuristic);
+    const validationCandidates = [...heuristicResults].sort((a: any, b: any) =>
+      (b.fitScore || 0) - (a.fitScore || 0) || (b._queryHits || 0) - (a._queryHits || 0)
+    );
 
     let validationStatus: "manus" | "heuristic" | "failed" = "heuristic";
     try {
@@ -696,12 +800,12 @@ ${memoryTexts.length ? memoryTexts.map((m: string, i: number) => `${i + 1}. ${m}
 City/country required: ${city || "Any"} ${meta.country ? `(${meta.country})` : ""}
 
 Candidate companies:
-${heuristicResults.slice(0, Math.max(numResults * 2, 12)).map((r: any, i: number) => `${i + 1}. ${JSON.stringify({
+${validationCandidates.slice(0, Math.max(numResults * 2, 12)).map((r: any, i: number) => `${i + 1}. ${JSON.stringify({
   title: r.title,
   url: r.url,
-  summary: r.summary,
-  highlights: r.highlights,
   pageText: String(r._pageText || "").slice(0, 1200),
+  mandatoryPrerequisitesMatched: r._prerequisiteMatches,
+  queryHitCount: r._queryHits,
 })}`).join("\n")}
 
 Return ONLY valid JSON. Validate that each lead is a real operating company, in the correct location, relevant to the selected opportunity, and supported by evidence.
@@ -712,6 +816,10 @@ For every candidate set these verification fields explicitly:
 - locationVerified: the supplied page evidence verifies the requested city/country, not merely a service area or query-generated summary.
 - isPrimaryCompanySource: the URL is the company's own website, not a directory, social profile, article, or aggregator.
 - requiredEvidenceVerified: page evidence satisfies at least one required buyer condition; use true when no required evidence was supplied.
+- eligibilityPass: true only when mandatory buyer evidence is verified from pageText.
+- verifiedAddress: the location-bearing address or branch text from pageText; empty when it cannot be verified.
+- evidenceQuote: a verbatim quotation from pageText proving the mandatory condition. Never use or paraphrase a search summary.
+- evidenceUrl: the exact candidate URL containing the quotation.
 - rejectReason: concise reason when any verification field is false, otherwise an empty string.
 - disqualifiers: concrete disqualifying evidence; return an empty array only when none is present.
 
@@ -739,36 +847,40 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
                   locationVerified: { type: "boolean" },
                   isPrimaryCompanySource: { type: "boolean" },
                   requiredEvidenceVerified: { type: "boolean" },
+                  eligibilityPass: { type: "boolean" },
+                  verifiedAddress: { type: "string" },
+                  evidenceQuote: { type: "string" },
+                  evidenceUrl: { type: "string" },
                   rejectReason: { type: "string" },
                 },
-                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed", "isRealCompany", "isOperating", "locationVerified", "isPrimaryCompanySource", "requiredEvidenceVerified", "rejectReason"],
+                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed", "isRealCompany", "isOperating", "locationVerified", "isPrimaryCompanySource", "requiredEvidenceVerified", "eligibilityPass", "verifiedAddress", "evidenceQuote", "evidenceUrl", "rejectReason"],
                 additionalProperties: false,
               },
             },
           },
           required: ["results"],
           additionalProperties: false,
-        }, { timeoutMs: 90_000, pollMs: 2_000 });
+        }, { timeoutMs: 90_000, pollMs: 2_000, profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
 
         const candidateKey = (value: string) => String(value || "").toLowerCase().replace(/\/$/, "");
         const byUrl = new Map(heuristicResults.map((r: any) => [candidateKey(r.url), r]));
         results = (validated.results || [])
           .filter((v: any) => byUrl.has(candidateKey(v.url)))
           .map((v: any) => ({ ...byUrl.get(candidateKey(v.url)), ...v }))
-          .filter((r: any) =>
-            r.isRealCompany &&
-            r.isOperating &&
-            (!city || r.locationVerified) &&
-            r.isPrimaryCompanySource &&
-            (!requiredEvidence.length || r.requiredEvidenceVerified) &&
-            (!Array.isArray(r.disqualifiers) || r.disqualifiers.length === 0) &&
-            String(r.evidence || "").trim().length >= 20 &&
-            r.fitScore >= 3
-          )
+          .filter((r: any) => {
+            const source = byUrl.get(candidateKey(r.url));
+            const normalizedPage = String(source?._pageText || "").toLowerCase().replace(/\s+/g, " ");
+            const normalizedQuote = String(r.evidenceQuote || "").toLowerCase().replace(/\s+/g, " ").trim();
+            const quoteVerified = normalizedQuote.length >= 15 && normalizedPage.includes(normalizedQuote);
+            return r.isRealCompany && r.isOperating && (!city || r.locationVerified) && r.isPrimaryCompanySource && r.eligibilityPass &&
+              (!requiredEvidence.length || r.requiredEvidenceVerified) && (!Array.isArray(r.disqualifiers) || r.disqualifiers.length === 0) &&
+              quoteVerified && candidateKey(r.evidenceUrl) === candidateKey(r.url) && r.fitScore >= 3;
+          })
           .sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
         validationStatus = "manus";
       } else {
-        results = heuristicResults.sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
+        validationStatus = heuristicResults.length ? "failed" : "heuristic";
+        results = [];
       }
     } catch (e: any) {
       console.warn("[exa-search] Manus validation failed; withholding unverified leads:", e?.message);
@@ -777,17 +889,32 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
     }
 
     // Remove internal fields before returning
-    results = results.slice(0, numResults).map(({ _fullText, _pageText, _url, _host, ...rest }: any) => rest);
+    results = results.slice(0, numResults).map(({
+      _fullText,
+      _pageText,
+      _url,
+      _host,
+      _queryHits,
+      _mandatoryMatches,
+      _prerequisiteMatches,
+      ...rest
+    }: any) => rest);
 
-    if (results.length === 0 && city) {
+    if (results.length === 0) {
       return res.json({
         results: [],
         message: validationStatus === "failed"
           ? "Lead validation is temporarily unavailable. No unverified leads were shown."
-          : `No verified companies found specifically in ${city}. Try a different category or city.`,
-        querySelection: selectedQueries,
+          : city
+            ? `No verified companies found specifically in ${city}. Try a different category or city.`
+            : "No company passed the required evidence and source-quality checks.",
+        querySelection: selectedQueries.map(item => ({
+          ...item,
+          contextApplied: memoryTexts.length ? ["mem0", "required evidence", "capability model"] : ["required evidence", "capability model fallback"],
+        })),
         exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
         validationStatus,
+        rejectedCount: allResults.length,
       });
     }
 
@@ -799,6 +926,7 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
       })),
       exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
       validationStatus,
+      rejectedCount: Math.max(0, allResults.length - results.length),
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });

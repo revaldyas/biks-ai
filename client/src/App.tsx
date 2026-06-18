@@ -29,6 +29,11 @@ export interface BusinessProfile {
   }[];
   products: string[];
   proofPoints: string[];
+  websiteEvidence?: {
+    claim: string;
+    quote: string;
+    sourceUrl: string;
+  }[];
   capabilityModel?: {
     capabilities: string[];
     outcomes: string[];
@@ -54,6 +59,14 @@ export interface ExpansionCategory {
   confidence?: number;
   contextApplied?: string[];
   memoriesUsed?: string[];
+  mustHaveEvidence?: {
+    requirement: string;
+    acceptableSignals: string[];
+    sellerCapability: string;
+    sourceType: "website" | "memory";
+    sourceEvidence: string;
+    confidence: number;
+  }[];
 }
 
 export interface Lead {
@@ -73,6 +86,10 @@ export interface Lead {
   disqualifiers?: string[];
   contextApplied?: string[];
   memoriesUsed?: string[];
+  eligibilityPass?: boolean;
+  verifiedAddress?: string;
+  evidenceUrl?: string;
+  evidenceQuote?: string;
 }
 
 export interface MemoryItem {
@@ -227,8 +244,9 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       {step === 1 && (
         <HeroStep
           onComplete={async (data) => {
-            setBusiness(data);
-            const id = await saveHistory("analysis", data.companyName, { business: data });
+            const normalized = { ...data, expansionCategories: [] };
+            setBusiness(normalized);
+            const id = await saveHistory("analysis", data.companyName, { business: normalized });
             if (id) setSessionId(id);
             goToStep(2);
           }}
@@ -242,6 +260,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       {step === 2 && business && (
         <DashboardStep
           business={business}
+          setBusiness={setBusiness}
           memories={memories}
           setMemories={setMemories}
           onSelectCategory={(i) => { setInitialCategory(i); goToStep(3); }}
