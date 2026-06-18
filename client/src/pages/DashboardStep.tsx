@@ -17,7 +17,6 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
   const [memoryInput, setMemoryInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
-  const [fetching, setFetching] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [generatingOpportunities, setGeneratingOpportunities] = useState(false);
   const [opportunityError, setOpportunityError] = useState("");
@@ -30,20 +29,13 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
   }, [business.website]);
 
   const fetchMemories = async () => {
-    setFetching(true);
     try {
       const res = await apiFetch(`/api/mem0?scope=${encodeURIComponent(business.website || business.companyName)}`);
       const data = await res.json();
       if (data.available && Array.isArray(data.items)) {
         setMemories(data.items);
-        if (business.expansionCategories.length > 0) {
-          const loaded = data.items.map((item: MemoryItem) => item.text).sort().join("\n");
-          const applied = (business.expansionCategories[0]?.memoriesUsed || []).slice().sort().join("\n");
-          setContextDirty(loaded !== applied);
-        }
       }
     } catch {}
-    setFetching(false);
   };
 
   const addMemory = async () => {
@@ -60,7 +52,6 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
         setMemories([...memories, { id: data.id, text: memoryInput.trim() }]);
         setSavedMsg(memoryInput.trim());
         setMemoryInput("");
-        setContextDirty(true);
         setTimeout(() => setSavedMsg(""), 3000);
       }
     } catch {}
@@ -72,7 +63,6 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
     try {
       await apiFetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
-      setContextDirty(true);
     } catch {}
     setDeletingId(null);
   };
@@ -86,7 +76,6 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           business,
-          memories: memories.map(memory => memory.text),
         }),
       });
       const data = await response.json();
@@ -234,7 +223,7 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
                 <div style={{ padding: "16px 14px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)" }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>Ready to find opportunities</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
-                    Add optional context below, or continue using the website capability model.
+                    Continue using the website capability model.
                   </div>
                 </div>
               )}
@@ -266,13 +255,13 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
         <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
           <button
             onClick={() => opportunitiesReady && !contextDirty ? onSelectCategory(0) : generateOpportunities()}
-            disabled={fetching || generatingOpportunities}
+            disabled={generatingOpportunities}
             style={{
               background: "var(--action)", color: "var(--action-fg)",
               border: "none", borderRadius: "var(--radius-md)",
               padding: "13px 32px", fontSize: 15, fontWeight: 600,
-              cursor: fetching || generatingOpportunities ? "wait" : "pointer", fontFamily: "var(--font-sans)",
-              opacity: fetching || generatingOpportunities ? 0.65 : 1,
+              cursor: generatingOpportunities ? "wait" : "pointer", fontFamily: "var(--font-sans)",
+              opacity: generatingOpportunities ? 0.65 : 1,
             }}
           >
             {generatingOpportunities

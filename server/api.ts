@@ -405,20 +405,16 @@ api.delete("/api/mem0", async (req: Request, res: Response) => {
 // POST /api/exa-search — Lead discovery via Exa
 // ============================================================
 api.post("/api/generate-opportunities", async (req: Request, res: Response) => {
-  const { business, memories = [] } = req.body;
+  const { business } = req.body;
   if (!business?.companyName || !business?.capabilityModel) return res.status(400).json({ error: "business capability profile is required" });
 
-  const memoryTexts = (Array.isArray(memories) ? memories : []).map((memory: any) => String(typeof memory === "string" ? memory : memory?.text || "").trim()).filter(Boolean);
   const prompt = `You are the opportunity-reasoning layer for an industry-agnostic B2B sales product.
 
 Seller profile extracted from its website:
 ${JSON.stringify({ companyName: business.companyName, website: business.website, products: business.products, valuePropositions: business.valuePropositions, capabilityModel: business.capabilityModel, websiteEvidence: business.websiteEvidence }, null, 2)}
 
-Business context supplied by the user through mem0 (highest priority when present):
-${memoryTexts.length ? memoryTexts.map((memory: string, index: number) => `${index + 1}. ${memory}`).join("\n") : "None. Use the website-derived capability fallback."}
-
 Generate 1-3 genuinely adjacent, non-obvious markets only when supported. Return fewer or zero rather than inventing weak opportunities.
-For every market, link it to a transferable seller capability and concrete buyer pain. Define at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably use or need the seller's offering. Each prerequisite must include specific acceptable website signals, the linked seller capability, its source, supporting source evidence, and confidence. User context may prioritize or exclude opportunities, but may not manufacture unsupported seller capabilities. Search queries must be location-free, target organizations rather than articles, and include concrete prerequisite signals. Never put a city or country in a base query. Disqualifiers must be concrete. Avoid broad labels whose members commonly lack the mandatory prerequisite.
+For every market, link it to a transferable seller capability and concrete buyer pain. Define at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably use or need the seller's offering. Each prerequisite must include specific acceptable website signals, the linked seller capability, its source, supporting source evidence, and confidence. Use only the website-derived capability model and website evidence. Search queries must be location-free, target organizations rather than articles, and include concrete prerequisite signals. Never put a city or country in a base query. Disqualifiers must be concrete. Avoid broad labels whose members commonly lack the mandatory prerequisite.
 
 Return JSON with an expansionCategories array.`;
 
@@ -437,7 +433,7 @@ Return JSON with an expansionCategories array.`;
                 type: "array",
                 items: {
                   type: "object",
-                  properties: { requirement: { type: "string" }, acceptableSignals: { type: "array", items: { type: "string" } }, sellerCapability: { type: "string" }, sourceType: { type: "string", enum: ["website", "memory"] }, sourceEvidence: { type: "string" }, confidence: { type: "number" } },
+                  properties: { requirement: { type: "string" }, acceptableSignals: { type: "array", items: { type: "string" } }, sellerCapability: { type: "string" }, sourceType: { type: "string" }, sourceEvidence: { type: "string" }, confidence: { type: "number" } },
                   required: ["requirement", "acceptableSignals", "sellerCapability", "sourceType", "sourceEvidence", "confidence"], additionalProperties: false,
                 },
               },
@@ -453,13 +449,13 @@ Return JSON with an expansionCategories array.`;
       .filter((category: any) => Number(category.confidence) >= 60)
       .map((category: any) => {
         const mustHaveEvidence = (Array.isArray(category.mustHaveEvidence) ? category.mustHaveEvidence : [])
-          .filter((item: any) => item?.requirement && item?.sellerCapability && item?.sourceEvidence && Array.isArray(item.acceptableSignals) && item.acceptableSignals.filter(Boolean).length > 0 && Number(item.confidence) >= 60)
+          .filter((item: any) => item?.requirement && item?.sellerCapability && item?.sourceType === "website" && item?.sourceEvidence && Array.isArray(item.acceptableSignals) && item.acceptableSignals.filter(Boolean).length > 0 && Number(item.confidence) >= 60)
           .map((item: any) => ({ ...item, acceptableSignals: item.acceptableSignals.map((signal: any) => String(signal).trim()).filter(Boolean) }));
-        return { ...category, mustHaveEvidence, requiredEvidence: mustHaveEvidence.map((item: any) => item.requirement), searchQueries: (Array.isArray(category.searchQueries) ? category.searchQueries : []).map((query: any) => String(query).trim()).filter(Boolean).slice(0, 8), contextApplied: memoryTexts.length ? ["mem0", "website capabilities", "website evidence"] : ["website capability fallback", "website evidence"], memoriesUsed: memoryTexts };
+        return { ...category, mustHaveEvidence, requiredEvidence: mustHaveEvidence.map((item: any) => item.requirement), searchQueries: (Array.isArray(category.searchQueries) ? category.searchQueries : []).map((query: any) => String(query).trim()).filter(Boolean).slice(0, 8), contextApplied: ["website capability model", "website evidence"], memoriesUsed: [] };
       })
       .filter((category: any) => category.mustHaveEvidence.length > 0 && category.searchQueries.length > 0)
       .slice(0, 3);
-    return res.json({ expansionCategories: categories, contextApplied: memoryTexts.length ? "mem0" : "website capability fallback" });
+    return res.json({ expansionCategories: categories, contextApplied: "website capability model" });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Opportunity generation failed" });
   }
