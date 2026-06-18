@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   lowQualitySourceReason,
+  matchMandatoryEvidence,
   selectStrongestQueries,
+  splitMemoryPolarity,
+  stripLocationTerms,
 } from "./leadDiscovery";
 
 describe("lead discovery query selection", () => {
@@ -73,5 +76,28 @@ describe("lead source filtering", () => {
         "Example Recovery Club"
       )
     ).toBeNull();
+  });
+});
+
+describe("industry-agnostic eligibility", () => {
+  it.each([
+    ["Water", "The recovery club has a cold plunge and hydrotherapy pool.", ["cold plunge", "aquatic recovery facility"], "cold plunge"],
+    ["Manufacturing", "Our production site operates ammonia refrigeration and cold storage.", ["industrial refrigeration", "cold storage"], "cold storage"],
+    ["Compliance", "The company publishes SOC 2 compliance and enterprise audit controls.", ["SOC 2 compliance", "regulated audit program"], "SOC 2 compliance"],
+  ])("matches mandatory evidence for %s buyers", (_industry, page, signals, expected) => {
+    expect(matchMandatoryEvidence(page, signals)).toContain(expected);
+  });
+
+  it("removes seller locations without removing buyer intent", () => {
+    expect(stripLocationTerms("premium recovery operators in Jakarta", ["Jakarta", "Indonesia"]))
+      .toBe("premium recovery operators");
+  });
+
+  it("keeps preferences and disqualifiers separate", () => {
+    const result = splitMemoryPolarity([
+      "Prioritize premium operators; avoid small studios without facilities",
+    ]);
+    expect(result.positive.join(" ")).toContain("premium operators");
+    expect(result.negativeTokens).toContain("small");
   });
 });

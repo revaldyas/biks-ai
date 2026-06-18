@@ -6,18 +6,24 @@ import Tooltip from "../components/Tooltip";
 
 interface Props {
   business: BusinessProfile;
+  setBusiness: (business: BusinessProfile) => void;
   memories: MemoryItem[];
   setMemories: (m: MemoryItem[]) => void;
   onSelectCategory: (index: number) => void;
 }
 
-export default function DashboardStep({ business, memories, setMemories, onSelectCategory }: Props) {
+export default function DashboardStep({ business, setBusiness, memories, setMemories, onSelectCategory }: Props) {
   const isMobile = useIsMobile();
   const [memoryInput, setMemoryInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [fetching, setFetching] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [generatingOpportunities, setGeneratingOpportunities] = useState(false);
+  const [opportunityError, setOpportunityError] = useState("");
+  const [contextDirty, setContextDirty] = useState(
+    business.expansionCategories.some(category => !category.mustHaveEvidence?.length),
+  );
 
   useEffect(() => {
     fetchMemories();
@@ -30,6 +36,11 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
       const data = await res.json();
       if (data.available && Array.isArray(data.items)) {
         setMemories(data.items);
+        if (business.expansionCategories.length > 0) {
+          const loaded = data.items.map((item: MemoryItem) => item.text).sort().join("\n");
+          const applied = (business.expansionCategories[0]?.memoriesUsed || []).slice().sort().join("\n");
+          setContextDirty(loaded !== applied);
+        }
       }
     } catch {}
     setFetching(false);
@@ -49,6 +60,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
         setMemories([...memories, { id: data.id, text: memoryInput.trim() }]);
         setSavedMsg(memoryInput.trim());
         setMemoryInput("");
+        setContextDirty(true);
         setTimeout(() => setSavedMsg(""), 3000);
       }
     } catch {}
@@ -60,9 +72,40 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
     try {
       await apiFetch(`/api/mem0?id=${id}`, { method: "DELETE" });
       setMemories(memories.filter(m => m.id !== id));
+      setContextDirty(true);
     } catch {}
     setDeletingId(null);
   };
+
+  const generateOpportunities = async () => {
+    setGeneratingOpportunities(true);
+    setOpportunityError("");
+    try {
+      const response = await apiFetch("/api/generate-opportunities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business,
+          memories: memories.map(memory => memory.text),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Opportunity discovery failed");
+      const expansionCategories = Array.isArray(data.expansionCategories) ? data.expansionCategories : [];
+      setBusiness({ ...business, expansionCategories });
+      setContextDirty(false);
+      if (!expansionCategories.length) {
+        setOpportunityError("No opportunity passed the evidence threshold. Add more business context or try a richer website.");
+      }
+    } catch (error) {
+      setOpportunityError(error instanceof Error ? error.message : "Opportunity discovery failed");
+    } finally {
+      setGeneratingOpportunities(false);
+    }
+  };
+
+  const opportunitiesReady = business.expansionCategories.length > 0
+    && business.expansionCategories.every(category => category.mustHaveEvidence?.length);
 
   return (
     <div style={{ minHeight: "calc(100vh - 57px)", display: "flex", flexDirection: "column", animation: "fadeIn 0.3s ease" }}>
@@ -179,10 +222,23 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
               <Tooltip text="Adjacent markets this company could expand into. Pick one on the Leads page to find prospects." />
             </div>
             <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 16, marginLeft: 30 }}>
-              Review possible markets, then generate leads.
+              Evidence-backed markets derived from capabilities and saved context.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {business.expansionCategories.slice(0, 3).map((cat, i) => (
+              {generatingOpportunities && (
+                <div style={{ padding: "22px 14px", color: "var(--ink-3)", fontSize: 13 }}>
+                  Testing transferable capabilities against new buyer conditions...
+                </div>
+              )}
+              {!generatingOpportunities && business.expansionCategories.length === 0 && (
+                <div style={{ padding: "16px 14px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)" }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>Ready to find opportunities</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                    Add optional context below, or continue using the website capability model.
+                  </div>
+                </div>
+              )}
+              {!generatingOpportunities && business.expansionCategories.slice(0, 3).map((cat, i) => (
                 <div
                   key={i}
                   style={{
@@ -193,24 +249,39 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
                 >
                   <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 600, marginBottom: 2 }}>{cat.name}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>{cat.whyRelevant}</div>
+                  {!!cat.mustHaveEvidence?.length && (
+                    <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.45, marginTop: 7 }}>
+                      <strong style={{ color: "var(--ink)" }}>Must show:</strong>{" "}
+                      {cat.mustHaveEvidence.map(item => item.requirement).join("; ")}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
+            {opportunityError && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>{opportunityError}</div>}
           </div>
         </div>
 
         {/* Primary CTA — market selection happens on the Leads page */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
           <button
-            onClick={() => onSelectCategory(0)}
+            onClick={() => opportunitiesReady && !contextDirty ? onSelectCategory(0) : generateOpportunities()}
+            disabled={fetching || generatingOpportunities}
             style={{
               background: "var(--action)", color: "var(--action-fg)",
               border: "none", borderRadius: "var(--radius-md)",
               padding: "13px 32px", fontSize: 15, fontWeight: 600,
-              cursor: "pointer", fontFamily: "var(--font-sans)",
+              cursor: fetching || generatingOpportunities ? "wait" : "pointer", fontFamily: "var(--font-sans)",
+              opacity: fetching || generatingOpportunities ? 0.65 : 1,
             }}
           >
-            Generate Leads →
+            {generatingOpportunities
+              ? "Finding Opportunities..."
+              : opportunitiesReady && !contextDirty
+                ? "Generate Leads"
+                : business.expansionCategories.length > 0
+                  ? "Refresh Opportunities"
+                  : "Find Opportunities"}
           </button>
         </div>
 

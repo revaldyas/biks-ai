@@ -147,6 +147,22 @@ describe("API route handlers", () => {
     }
   });
 
+  it("POST /api/generate-opportunities requires a capability profile", async () => {
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+    try {
+      const res = await fetch(`http://localhost:${port}/api/generate-opportunities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business: { companyName: "Example" } }),
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("capability profile");
+    } finally {
+      close();
+    }
+  });
+
   it("POST /api/exa-search selects four strong queries and filters directory results", async () => {
     const origExa = process.env.EXA_API_KEY;
     const origManus = process.env.MANUS_API_KEY;
@@ -159,8 +175,8 @@ describe("API route handlers", () => {
         exaRequests.push(JSON.parse(String(init?.body || "{}")));
         return new Response(JSON.stringify({
           results: [
-            { title: "Example Recovery Club", url: "https://recovery.example.com", text: "Premium recovery club with visible cold plunge facilities and current booking information.", summary: "Operating premium recovery club." },
-            { title: "Top 10 Recovery Clubs", url: "https://www.yelp.com/biz/recovery", text: "Directory listing", summary: "Directory listing" },
+            { title: "Example Recovery Club", url: "https://recovery.example.com", text: "Premium recovery club with visible cold plunge facilities. Address: 12 Orchard Road, Singapore 123456.", summary: "Operating premium recovery club." },
+            { title: "Top 10 Recovery Clubs Singapore", url: "https://www.yelp.com/biz/recovery", text: "Directory listing at 10 Singapore Street.", summary: "Directory listing" },
           ],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -184,6 +200,7 @@ describe("API route handlers", () => {
             "sports performance facilities",
           ],
           memories: ["Prioritize premium buyers and avoid small operators"],
+          city: "Singapore",
           category: {
             name: "Recovery centers",
             requiredEvidence: ["visible cold plunge facilities"],
@@ -202,7 +219,9 @@ describe("API route handlers", () => {
       );
       expect(data.exaRequestCount).toBeLessThanOrEqual(12);
       expect(exaRequests).toHaveLength(data.exaRequestCount);
-      expect(data.results.map((result: any) => result.url)).toEqual(["https://recovery.example.com"]);
+      expect(data.validationStatus).toBe("failed");
+      expect(data.results).toEqual([]);
+      expect(data.message).toContain("No unverified leads were shown");
     } finally {
       close();
       fetchSpy.mockRestore();

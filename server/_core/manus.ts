@@ -37,6 +37,7 @@ export type ManusTaskOptions = {
   timeoutMs?: number;
   pollMs?: number;
   onProgress?: ManusProgressFn;
+  profile?: string;
 };
 
 export async function manusTask<T>(
@@ -44,7 +45,7 @@ export async function manusTask<T>(
   schema: Record<string, unknown>,
   options: ManusTaskOptions = {}
 ): Promise<T> {
-  const { timeoutMs = 180_000, pollMs = 2_500, onProgress } = options;
+  const { timeoutMs = 180_000, pollMs = 2_500, onProgress, profile = AGENT_PROFILE } = options;
 
   const apiKey = process.env.MANUS_API_KEY;
   if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
@@ -60,7 +61,7 @@ export async function manusTask<T>(
   const createBody = JSON.stringify({
     message: { content: prompt },
     structured_output_schema: schema,
-    agent_profile: AGENT_PROFILE,
+    agent_profile: profile,
   });
   let created: any = null;
   let lastErr = "task.create error";
@@ -175,6 +176,7 @@ export async function manusTask<T>(
 export async function startManusTask(
   prompt: string,
   schema: Record<string, unknown>,
+  options: Pick<ManusTaskOptions, "profile"> = {},
 ): Promise<string> {
   const apiKey = process.env.MANUS_API_KEY;
   if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
@@ -183,7 +185,7 @@ export async function startManusTask(
   const createRes = await fetch(`${BASE}/task.create`, {
     method: "POST",
     headers: hdrs,
-    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema, agent_profile: AGENT_PROFILE }),
+    body: JSON.stringify({ message: { content: prompt }, structured_output_schema: schema, agent_profile: options.profile || AGENT_PROFILE }),
   });
 
   if (!createRes.ok) {
