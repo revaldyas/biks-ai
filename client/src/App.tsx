@@ -90,6 +90,17 @@ export interface Lead {
   verifiedAddress?: string;
   evidenceUrl?: string;
   evidenceQuote?: string;
+  facilityEvidence?: string;
+  locationEvidence?: string;
+  operatingEvidence?: string;
+  opportunityPriority?: "High" | "Medium" | "Low";
+  opportunitySignal?: string;
+  opportunitySignalType?: string;
+  opportunitySignalDate?: string;
+  opportunitySignalSource?: string;
+  whyNow?: string;
+  confidence?: number;
+  verificationStatus?: string;
 }
 
 export interface MemoryItem {

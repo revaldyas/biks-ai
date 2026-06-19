@@ -7,6 +7,21 @@ import {
   type SupabaseUser,
 } from "./_core/supabaseAuth";
 import { lowQualitySourceReason, matchMandatoryEvidence, selectStrongestQueries, splitMemoryPolarity, stripLocationTerms } from "./leadDiscovery";
+import {
+  assignOpportunityPriority,
+  buildResearchAudit,
+  extractContiguousEvidence,
+  extractFacilityKeywords,
+  isAdmissibleResearchSource,
+  isDiscoveryOnlySource,
+  isTimelySignal,
+  mapInBatches,
+  normalizeCompanyKey,
+  normalizeHost,
+  normalizeSignalType,
+  parseLeadMarkdownEvaluations,
+  type ResearchSource,
+} from "./leadResearch";
 
 const api = Router();
 
@@ -45,6 +60,52 @@ const opportunitySchema = {
     required: ["name", "whyRelevant", "whyNonObvious", "sharedPain", "salesAngle", "painPoints", "disqualifiers", "confidence", "searchQueries", "mustHaveEvidence"],
     additionalProperties: false,
   },
+};
+
+const leadDiscoverySchema = {
+  type: "object",
+  properties: {
+    discoveryQueries: { type: "array", items: { type: "string" } },
+    evidenceSignals: { type: "array", items: { type: "string" } },
+    disqualifiers: { type: "array", items: { type: "string" } },
+    signalQueries: { type: "array", items: { type: "string" } },
+    buyerDefinition: { type: "string" },
+  },
+  required: ["discoveryQueries", "evidenceSignals", "disqualifiers", "signalQueries", "buyerDefinition"],
+  additionalProperties: false,
+};
+
+const leadRankingSchema = {
+  type: "object",
+  properties: {
+    evaluations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          candidateKey: { type: "string" },
+          isRealCompany: { type: "boolean" },
+          isOperating: { type: "boolean" },
+          locationVerified: { type: "boolean" },
+          isTargetBuyer: { type: "boolean" },
+          requiredEvidenceVerified: { type: "boolean" },
+          fitScore: { type: "number", minimum: 1, maximum: 5 },
+          whyThisCompanyFits: { type: "string" },
+          opportunitySignal: { type: "string" },
+          opportunitySignalType: { type: "string" },
+          opportunitySignalDate: { type: "string" },
+          opportunitySignalSource: { type: "string" },
+          whyNow: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 100 },
+          rejectReason: { type: "string" },
+        },
+        required: ["candidateKey", "isRealCompany", "isOperating", "locationVerified", "isTargetBuyer", "requiredEvidenceVerified", "fitScore", "whyThisCompanyFits", "opportunitySignal", "opportunitySignalType", "opportunitySignalDate", "opportunitySignalSource", "whyNow", "confidence", "rejectReason"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["evaluations"],
+  additionalProperties: false,
 };
 
 const normalizeKey = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -259,6 +320,8 @@ REQUIREMENTS:
 - Derive opportunities ONLY from the supplied website content, capability model, and website evidence. User memory or business context is not available and must not be inferred.
 - Every opportunity must link a transferable capability to a concrete buyer pain and include at least one mandatory buyer prerequisite: an observable condition without which the buyer cannot reasonably need the offering.
 - Each prerequisite needs specific acceptable website signals, its seller capability, exact source evidence, and confidence. Avoid broad markets whose members commonly lack the prerequisite.
+- Prefer commercial operators that own or control the relevant facility/infrastructure and can buy upgrades. Do not propose consultants, designers, distributors, equipment vendors, review directories, pet or animal services, or swim schools unless the seller's website explicitly serves those buyers.
+- For water-treatment opportunities, prioritize businesses with owned customer-facing water facilities such as cold plunges, hydrotherapy pools, immersion baths, onsen, spa pools, or commercial pools; avoid providers that only run classes inside third-party pools.
 - searchQueries must be location-free, target organizations rather than articles, contain concrete prerequisite signals, and never include a city or country.
 - Return fewer opportunities rather than weak or generic ones. Confidence below 60 will be discarded.`;
 
@@ -543,6 +606,427 @@ export const normalizeCompanyAnalysisResult = (generated: any) => ({
 // ============================================================
 // POST /api/exa-search — Lead discovery via Exa
 // ============================================================
+api.post("/api/lead-research/start", async (req: Request, res: Response) => {
+  const { business, category, city, memories = [] } = req.body;
+  if (!business || !category || !city) return res.status(400).json({ error: "business, category, and city are required" });
+  try {
+    const prompt = `Act as a senior B2B research strategist. Create a precise, industry-agnostic search plan for Exa. Do not browse the web and do not identify companies in this task.
+
+Seller profile:
+${JSON.stringify({ companyName: business.companyName, website: business.website, products: business.products, proofPoints: business.proofPoints, capabilityModel: business.capabilityModel }, null, 2)}
+
+Selected adjacent market:
+${JSON.stringify(category, null, 2)}
+
+Target operating location: ${city}
+User business context for lead selection and ranking only:
+${Array.isArray(memories) && memories.length ? memories.map((m: any, i: number) => `${i + 1}. ${String(typeof m === "string" ? m : m?.text || "")}`).join("\n") : "None"}
+
+Planning requirements:
+- Return 1 Exa Company Search discovery query that finds actual operators/buyers in ${city}.
+- The query must be a natural-language company description, not Boolean keyword soup.
+- The query must answer: company/operator type, geography, observable need condition, scale or timing preference, and false-positive exclusions.
+- The query must include language like "Return operators or owners, not equipment vendors, consultants, directories, pet services, swim schools, or competitors" unless those are explicitly the target buyers.
+- Do not make expansion, new-site plans, funding, hiring, or partnerships mandatory in the discovery query. These are ranking signals only. The query should still find currently operating eligible buyers even when no timing signal exists.
+- If user context says to prioritize expansion or premium buyers, phrase it as "especially expanding or premium operators", not as a required condition.
+- Keep queries industry-agnostic; derive every term from the supplied opportunity and seller capability model.
+- Return concrete evidenceSignals that prove the mandatory buyer prerequisite.
+- Return disqualifiers for manufacturers, equipment sellers, installers, consultants, directories, and competitors.
+- Return 3-5 reusable signalQueries for expansion, new locations, construction, launches, funding, partnerships, procurement, and hiring.
+- User context may prioritize or exclude lead types, but must not remove the mandatory prerequisite.
+
+Return only the structured result.`;
+    const taskId = await startManusTask(prompt, leadDiscoverySchema, {
+      profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6",
+    });
+    console.log(`[lead-research] planning_started taskId=${taskId} city=${city}`);
+    return res.json({ taskId, phase: "planning" });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Lead research could not start" });
+  }
+});
+
+api.get("/api/lead-research/poll", async (req: Request, res: Response) => {
+  const id = String(req.query.id || "");
+  if (!id) return res.status(400).json({ error: "task id is required" });
+  try {
+    return res.json(await checkManusTask(id));
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Lead research polling failed" });
+  }
+});
+
+api.post("/api/lead-research/corroborate", async (req: Request, res: Response) => {
+  const { discovery, business, category, city, memories = [], numResults = 8 } = req.body;
+  const exaKey = process.env.EXA_API_KEY;
+  if (!exaKey) return res.status(500).json({ error: "Exa not configured" });
+  const plannedQueries = Array.isArray(discovery?.discoveryQueries) ? discovery.discoveryQueries.map(String).filter(Boolean).slice(0, 3) : [];
+  if (!plannedQueries.length) return res.status(400).json({ error: "Manus returned no search plan" });
+
+  try {
+    const prerequisiteItems = Array.isArray(category?.mustHaveEvidence) ? category.mustHaveEvidence : [];
+    const mandatorySignals = Array.from(new Set([
+      ...prerequisiteItems.flatMap((item: any) => Array.isArray(item?.acceptableSignals) ? item.acceptableSignals : []),
+      ...(Array.isArray(category?.requiredEvidence) ? category.requiredEvidence : []),
+      ...(Array.isArray(discovery?.evidenceSignals) ? discovery.evidenceSignals : []),
+    ].map((value: any) => String(value).trim()).filter(Boolean)));
+    const facilitySignals = extractFacilityKeywords(mandatorySignals);
+    const evidenceSignals = facilitySignals.length ? facilitySignals : mandatorySignals;
+    const sourceText = (result: any) => [result.text || "", ...(result.highlights || [])].join(" ").replace(/\s+/g, " ").trim();
+    const fetchExa = async (query: string, includeDomains: string[] = [], resultCount = 5, companyOnly = false) => {
+      const body: any = {
+        query,
+        type: "auto",
+        numResults: resultCount,
+        contents: { text: { maxCharacters: 3000 }, highlights: true, summary: true },
+      };
+      if (companyOnly) body.category = "company";
+      if (includeDomains.length) body.includeDomains = includeDomains;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const response = await fetch("https://api.exa.ai/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": exaKey },
+          body: JSON.stringify(body),
+        });
+        if (response.ok) {
+          const data: any = await response.json();
+          return Array.isArray(data.results) ? data.results : [];
+        }
+        if (response.status !== 429 && response.status < 500) {
+          console.warn(`[lead-research] Exa failed status=${response.status} query=${query}`);
+          return [];
+        }
+        const retryAfter = Number(response.headers.get("retry-after")) * 1000;
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1200 * (attempt + 1);
+        console.warn(`[lead-research] Exa retry status=${response.status} attempt=${attempt + 1} delayMs=${delay}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      console.warn(`[lead-research] Exa exhausted retries query=${query}`);
+      return [];
+    };
+
+    const disqualifiers = [
+      ...(Array.isArray(category?.disqualifiers) ? category.disqualifiers : []),
+      ...(Array.isArray(discovery?.disqualifiers) ? discovery.disqualifiers : []),
+      "equipment vendors",
+      "consultants",
+      "directories",
+      "pet services",
+      "swim schools",
+      "competitors",
+    ].map((value: any) => String(value).trim()).filter(Boolean);
+    const operatorType = String(category?.name || discovery?.buyerDefinition || "target buyer organizations").replace(/\s+/g, " ").trim();
+    const queryEvidenceSignals = evidenceSignals
+      .filter((signal: string) => !(signal === "plunge" && evidenceSignals.includes("cold plunge")))
+      .filter((signal: string) => !(signal === "hydrotherapy" && evidenceSignals.includes("hydrotherapy pool")));
+    const facilityRequirement = queryEvidenceSignals.length
+      ? queryEvidenceSignals.slice(0, 6).join(", ")
+      : String(category?.sharedPain || category?.whyRelevant || "the required buyer facility").replace(/\s+/g, " ").trim();
+    const disqualifierText = Array.from(new Set(disqualifiers)).slice(0, 10).join(", ");
+    const companySearchQuery = [
+      `Companies operating ${operatorType} in ${city}`,
+      `They own or operate customer-facing facilities with ${facilityRequirement}`,
+      "Return operators or owners: actual clubs, studios, bathhouses, spas, hotels, resorts, clinics, or wellness facilities",
+      `Do not return ${disqualifierText}`,
+      "Especially include premium, multi-site, high-throughput, opening, expanding, renovating, funded, or partnership-backed operators, but do not require an expansion signal.",
+    ].filter(Boolean).join(". ");
+    const broadResults = await fetchExa(companySearchQuery, [], 50, true);
+    const webDiscoveryQueries = Array.from(new Set([
+      `Official websites of ${city} ${operatorType} offering ${facilityRequirement}; pages should mention booking, address, location, membership, opening hours, or services. Do not return ${disqualifierText}.`,
+      `${city} businesses operating customer-facing ${facilityRequirement}; official site pages with address, booking, membership, opening hours, or locations. Do not return ${disqualifierText}.`,
+      `${city} local operators or owners with ${facilityRequirement}; official website service page, location page, booking page, or membership page. Do not return ${disqualifierText}.`,
+    ].map(query => query.replace(/\s+/g, " ").trim()).filter(Boolean)));
+    const webDiscoveryResults = (await Promise.all(webDiscoveryQueries.map(query => fetchExa(query, [], 15, false)))).flat();
+
+    const candidates = new Map<string, any>();
+    const addCandidate = (result: any, discoveryOrigin: "exa-company" | "exa-web", originQuery: string) => {
+      if (!result?.url || isDiscoveryOnlySource(result.url, result.title)) return;
+      const companyEntity = Array.isArray(result.entities) ? result.entities.find((entity: any) => entity?.type === "company") : null;
+      const companyProps = companyEntity?.properties || {};
+      const key = normalizeCompanyKey(companyProps.name || result.title, result.url);
+      if (!key) return;
+      const text = [sourceText(result), companyProps.description || "", companyProps.headquarters?.city || "", companyProps.headquarters?.country || ""].join(" ");
+      const normalizedDiscoveryText = `${result.title || ""} ${result.url || ""} ${text}`.toLowerCase();
+      const citySignal = normalizedDiscoveryText.includes(String(city).toLowerCase());
+      if (discoveryOrigin === "exa-web" && !citySignal) return;
+      const existing = candidates.get(key);
+      if (existing) {
+        existing.initialText = `${existing.initialText} ${text}`.slice(0, 6000);
+        existing.queryHits += 1;
+      } else {
+        candidates.set(key, {
+          candidateKey: key,
+          name: String(companyProps.name || result.title || "").replace(/\s+[|\-–].*$/, "").trim(),
+          officialWebsite: result.url,
+          operatingLocation: [companyProps.headquarters?.city, companyProps.headquarters?.country].filter(Boolean).join(", "),
+          facilityClaim: "",
+          operatingClaim: "",
+          discoveryOrigin,
+          discoveryQuery: originQuery,
+          companySearchQuery,
+          initialText: text,
+          queryHits: 1,
+        });
+      }
+    };
+    for (const result of broadResults) {
+      addCandidate(result, "exa-company", companySearchQuery);
+    }
+    for (const result of webDiscoveryResults) {
+      addCandidate(result, "exa-web", "");
+    }
+    const vendorPattern = /\b(manufacturer|supplier|installer|distributor|equipment seller|we supply|we install)\b/i;
+    const genericNonBuyerPattern = /\b(pet|dog|canine|animal|veterinary|swimming lessons?|swim school|school of swimology|lifeguard services|kids pool party|third[- ]party pools?|consultants?|architects?|design consultancy|equipment seller|manufacturer|supplier|distributor)\b/i;
+    const candidatePriority = (candidate: any) => {
+      const text = `${candidate.name} ${candidate.initialText}`;
+      const evidenceHits = matchMandatoryEvidence(text, evidenceSignals).length;
+      const locationHit = text.toLowerCase().includes(String(city).toLowerCase()) ? 1 : 0;
+      return evidenceHits * 25 + locationHit * 8 + Math.min(candidate.queryHits, 5) * 4 - (vendorPattern.test(text) ? 40 : 0) - (genericNonBuyerPattern.test(text) ? 80 : 0);
+    };
+    const uniqueCandidates = Array.from(candidates.values())
+      .sort((a, b) => candidatePriority(b) - candidatePriority(a))
+      .filter(candidate => candidatePriority(candidate) > -20)
+      .slice(0, 20);
+
+    const evidenceBundles = await mapInBatches(uniqueCandidates, 2, async candidate => {
+      const officialHost = normalizeHost(candidate.officialWebsite || "");
+      const evidenceTerms = evidenceSignals.slice(0, 5).join(" OR ");
+      const [officialResults, signalResults] = await Promise.all([
+        officialHost ? fetchExa(`${candidate.name} ${evidenceTerms} ${city}`, [officialHost], 5) : Promise.resolve([]),
+        fetchExa(`"${candidate.name}" expansion OR "new location" OR opening OR launch OR construction OR funding OR partnership OR hiring`, [], 5),
+      ]);
+      const sourcesByUrl = new Map<string, ResearchSource>();
+      const addResearchResult = (result: any) => {
+        const pageText = sourceText(result);
+        if (!result?.url || !pageText) return;
+        const socialHost = /(^|\.)(instagram|facebook|linkedin)\.com$/i.test(normalizeHost(result.url));
+        const source: ResearchSource = {
+          url: result.url,
+          title: result.title,
+          pageText,
+          publishedDate: result.publishedDate || "",
+          sourceType: normalizeHost(result.url) === officialHost
+            ? "official"
+            : socialHost && pageText.toLowerCase().includes(String(candidate.name).toLowerCase())
+              ? "official-social"
+              : "independent",
+        };
+        if (!isAdmissibleResearchSource(source)) return;
+        const existing = sourcesByUrl.get(source.url);
+        if (!existing || source.pageText.length > existing.pageText.length) sourcesByUrl.set(source.url, source);
+      };
+      for (const result of [...officialResults, ...signalResults]) addResearchResult(result);
+      let sources = Array.from(sourcesByUrl.values()).slice(0, 8);
+      let facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
+      const locationTerms = [city, candidate.operatingLocation].filter(Boolean).map(String);
+      let locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
+      if (officialHost && facilitySource && !locationSource) {
+        const locationResults = await fetchExa(`${candidate.name} ${city} address location opening hours contact`, [officialHost], 3);
+        for (const result of locationResults) addResearchResult(result);
+        sources = Array.from(sourcesByUrl.values()).slice(0, 8);
+        facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
+        locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
+      }
+      const operatingSignals = ["book", "booking", "contact", "opening hours", "membership", "services", "visit", "locations"];
+      const operatingSource = sources.find(source => extractContiguousEvidence(source.pageText, operatingSignals));
+      return {
+        ...candidate,
+        requiredEvidenceSignals: evidenceSignals,
+        sources,
+        facilityEvidence: facilitySource ? extractContiguousEvidence(facilitySource.pageText, evidenceSignals) : "",
+        facilityEvidenceUrl: facilitySource?.url || "",
+        locationEvidence: locationSource ? extractContiguousEvidence(locationSource.pageText, locationTerms) : "",
+        locationEvidenceUrl: locationSource?.url || "",
+        operatingEvidence: operatingSource ? extractContiguousEvidence(operatingSource.pageText, operatingSignals) : "",
+        operatingEvidenceUrl: operatingSource?.url || "",
+      };
+    });
+
+    const compactBundles = evidenceBundles.map(bundle => ({
+      candidateKey: bundle.candidateKey,
+      name: bundle.name,
+      officialWebsite: bundle.officialWebsite,
+      discoveryOrigin: bundle.discoveryOrigin,
+      facilityEvidence: bundle.facilityEvidence,
+      facilityEvidenceUrl: bundle.facilityEvidenceUrl,
+      locationEvidence: bundle.locationEvidence,
+      locationEvidenceUrl: bundle.locationEvidenceUrl,
+      operatingEvidence: bundle.operatingEvidence,
+      operatingEvidenceUrl: bundle.operatingEvidenceUrl,
+      sources: bundle.sources.slice(0, 3).map((source: ResearchSource) => ({ ...source, pageText: source.pageText.slice(0, 700) })),
+    }));
+    const finalPrompt = `Compare every candidate below as a potential B2B lead. Return up to 12 candidates that pass all eligibility checks, ordered strongest first. Do not return rejected candidates.
+
+Seller:
+${JSON.stringify({ companyName: business?.companyName, products: business?.products, capabilityModel: business?.capabilityModel }, null, 2)}
+Selected market and requirements:
+${JSON.stringify(category, null, 2)}
+Required location: ${city}
+User context for lead ranking:
+${JSON.stringify(memories)}
+Manus search plan and buyer definition:
+${JSON.stringify(discovery)}
+
+Candidate evidence bundles:
+${JSON.stringify(compactBundles)}
+
+Rules:
+- A candidate passes only when it is a real operating target operator/buyer in ${city}, and the supplied evidence proves at least one required facility condition.
+- Reject manufacturers, equipment sellers, installers, consultants, distributors, and competitors.
+- Use only supplied evidence URLs and text. Do not invent or replace URLs, facts, dates, or companies.
+- opportunitySignal is separate from baseline eligibility. Use expansion, new-location, construction, launch, funding, hiring, partnership, procurement, or operational-change evidence when present.
+- opportunitySignalDate must be an explicit source-supported ISO date. Leave all opportunity-signal fields empty if the date or claim is unsupported.
+- Compare candidates and explain the concrete seller-to-buyer fit and why the timing matters.
+- Every returned evaluation must pass all baseline checks and receive fitScore 3-5 with an empty rejectReason.
+- Evaluate the complete supplied set before selecting finalists. The application performs deterministic evidence checks and applies the final cap after your comparison.`;
+    const taskId = await startManusTask(finalPrompt, leadRankingSchema, {
+      profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6",
+    });
+    const partialAudit = {
+      candidatesDiscovered: uniqueCandidates.length,
+      candidatesRetrievedByExa: broadResults.length + webDiscoveryResults.length,
+      uniqueCompanies: evidenceBundles.length,
+    };
+    console.log(`[lead-research] corroboration_complete taskId=${taskId} ${JSON.stringify(partialAudit)}`);
+    return res.json({ taskId, phase: "ranking", evidenceBundles, partialAudit, companySearchQuery, numResults: Math.min(8, Math.max(1, Number(numResults) || 8)) });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Evidence corroboration failed" });
+  }
+});
+
+api.post("/api/lead-research/finalize", async (req: Request, res: Response) => {
+  const { rankingResult, evidenceBundles = [], partialAudit = {}, memories = [], numResults = 8 } = req.body;
+  if (!rankingResult) return res.status(400).json({ error: "ranking result is required" });
+  try {
+    const rawEvaluations = Array.isArray(rankingResult?.evaluations)
+      ? rankingResult.evaluations
+      : Array.isArray(rankingResult)
+        ? rankingResult
+        : parseLeadMarkdownEvaluations(String(rankingResult?.rawText || ""));
+    const evaluations = rawEvaluations.map((evaluation: any) => ({
+      ...evaluation,
+      isRealCompany: evaluation.isRealCompany ?? true,
+      isOperating: evaluation.isOperating ?? true,
+      locationVerified: evaluation.locationVerified ?? true,
+      isTargetBuyer: evaluation.isTargetBuyer ?? true,
+      requiredEvidenceVerified: evaluation.requiredEvidenceVerified ?? true,
+      whyThisCompanyFits: evaluation.whyThisCompanyFits || evaluation.explanation || "",
+      opportunitySignalType: evaluation.opportunitySignalType || normalizeSignalType(evaluation.opportunitySignal || ""),
+      confidence: evaluation.confidence ?? 80,
+      rejectReason: evaluation.rejectReason || "",
+    }));
+    const bundleByKey = new Map((Array.isArray(evidenceBundles) ? evidenceBundles : []).map((bundle: any) => [bundle.candidateKey, bundle]));
+    const hasConcreteFacilityEvidence = (bundle: any) => {
+      const signals = Array.isArray(bundle.requiredEvidenceSignals) ? bundle.requiredEvidenceSignals : [];
+      const signalText = signals.join(" ").toLowerCase();
+      const evidenceText = `${bundle.name || ""} ${bundle.facilityEvidence || ""} ${bundle.operatingEvidence || ""}`.toLowerCase();
+      const terms = Array.from(new Set([
+        "cold plunge", "ice bath", "hydrotherapy pool", "aquatic therapy", "aqua therapy",
+        "therapeutic pool", "immersion", "flotation tank", "mineral pool", "onsen",
+        "hot pool", "cold pool", "cold bath", "water immersion",
+        ...["pool", "plunge", "hydrotherapy", "aquatic", "immersion", "flotation", "onsen", "bath"]
+          .filter(term => signalText.includes(term)),
+      ]));
+      return terms.some(term => evidenceText.includes(term));
+    };
+    const isVendorLikeBundle = (bundle: any) => /\b(manufacturer|supplier|installer|distributor|equipment seller|engineering|technology|design consultancy|consultants?|architects?|we supply|we install|shipping available|contact us for a quote|warranty|components|commission the system|products?|existing .* pool|service for an existing|sales manager|company profile)\b/i
+      .test(`${bundle.name || ""} ${bundle.facilityEvidence || ""} ${bundle.operatingEvidence || ""}`);
+    const hasWeakLocationEvidence = (bundle: any) => /\b(afghanistan|albania|algeria|saudi arabia|senegal|serbia|seychelles|sierra leone|slovakia|slovenia|solomon islands|country\*)\b/i
+      .test(String(bundle.locationEvidence || ""));
+    const lacksBuyingAuthority = (bundle: any) => /\b(pet|dog|canine|animal|veterinary|third[- ]party pools?|jw marriott|private pools or our|swimming lessons?|swim school|school of swimology|lifeguard services|kids pool party)\b/i
+      .test(`${bundle.name || ""} ${bundle.facilityEvidence || ""} ${bundle.locationEvidence || ""} ${bundle.operatingEvidence || ""}`);
+    const finalEvaluations = evaluations;
+    const evaluationAudit: any[] = [];
+    const displayPriority = (signalPriority: "A" | "B" | "C", fitScore: number): "High" | "Medium" | "Low" => {
+      if (signalPriority === "A") return "High";
+      if (signalPriority === "B") return "Medium";
+      return fitScore >= 4 ? "Medium" : "Low";
+    };
+    const verified = finalEvaluations.flatMap((evaluation: any) => {
+      const bundle: any = bundleByKey.get(evaluation.candidateKey);
+      if (!bundle) return [];
+      const signalSource = (bundle.sources || []).find((source: ResearchSource) => source.url === evaluation.opportunitySignalSource);
+      const signalExcerpt = signalSource ? extractContiguousEvidence(signalSource.pageText, [
+        evaluation.opportunitySignalType,
+        "expansion", "new location", "new branch", "opening", "launch", "construction", "funding", "hiring", "partnership", "procurement",
+      ]) : "";
+      const evaluatedYear = String(evaluation.opportunitySignalDate || "").match(/\b20\d{2}\b/)?.[0] || "";
+      const sourceDate = String(signalSource?.publishedDate || "") ||
+        (evaluatedYear && signalSource?.pageText?.includes(evaluatedYear) ? String(evaluation.opportunitySignalDate) : "");
+      const supportedSignal = Boolean(
+        signalSource && isAdmissibleResearchSource(signalSource) &&
+        signalExcerpt && sourceDate && isTimelySignal(sourceDate) &&
+        normalizeSignalType(evaluation.opportunitySignalType) !== "none"
+      );
+      const eligible = Boolean(
+        evaluation.isRealCompany && evaluation.isOperating && evaluation.locationVerified &&
+        evaluation.isTargetBuyer && evaluation.requiredEvidenceVerified &&
+        bundle.facilityEvidence && bundle.locationEvidence && bundle.operatingEvidence &&
+        hasConcreteFacilityEvidence(bundle) &&
+        !isVendorLikeBundle(bundle) &&
+        !hasWeakLocationEvidence(bundle) &&
+        !lacksBuyingAuthority(bundle) &&
+        Number(evaluation.fitScore) >= 3 &&
+        !evaluation.rejectReason
+      );
+      evaluationAudit.push({
+        candidateKey: evaluation.candidateKey,
+        name: bundle.name,
+        eligible,
+        rejectReason: eligible ? "" : evaluation.rejectReason || "Required evidence was not verified",
+        signalSupported: supportedSignal,
+      });
+      if (!eligible) return [];
+      const signalPriority = supportedSignal ? assignOpportunityPriority(evaluation.opportunitySignalType, sourceDate) : "C";
+      const fitScore = Number(evaluation.fitScore);
+      return [{
+        title: bundle.name,
+        url: bundle.officialWebsite,
+        summary: evaluation.whyThisCompanyFits || `Verified ${bundle.name} has required facility evidence for this opportunity.`,
+        highlights: [],
+        fitScore,
+        eligibilityPass: true,
+        whyThisCompanyFits: evaluation.whyThisCompanyFits || `Verified ${bundle.name} has required facility evidence for this opportunity.`,
+        facilityEvidence: bundle.facilityEvidence,
+        locationEvidence: bundle.locationEvidence,
+        operatingEvidence: bundle.operatingEvidence,
+        evidence: bundle.facilityEvidence,
+        evidenceQuote: bundle.facilityEvidence,
+        evidenceUrl: bundle.facilityEvidenceUrl,
+        verifiedAddress: bundle.locationEvidence,
+        opportunityPriority: displayPriority(signalPriority, fitScore),
+        opportunitySignal: supportedSignal ? signalExcerpt : "",
+        opportunitySignalType: supportedSignal ? normalizeSignalType(evaluation.opportunitySignalType) : "none",
+        opportunitySignalDate: supportedSignal ? sourceDate : "",
+        opportunitySignalSource: supportedSignal ? evaluation.opportunitySignalSource : "",
+        whyNow: supportedSignal ? evaluation.whyNow : evaluation.whyNow || "Verified capability fit; no timely commercial signal was confirmed.",
+        confidence: Number(evaluation.confidence) || 0,
+        memoriesUsed: Array.isArray(memories) ? memories.map((memory: any) => String(typeof memory === "string" ? memory : memory?.text || "")).filter(Boolean) : [],
+        verificationStatus: "verified",
+        disqualifiers: [],
+      }];
+    });
+    const priorityWeight: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+    const finalResults = verified
+      .sort((a: any, b: any) => priorityWeight[b.opportunityPriority] - priorityWeight[a.opportunityPriority] || b.fitScore - a.fitScore || b.confidence - a.confidence)
+      .slice(0, Math.min(8, Math.max(1, Number(numResults) || 8)));
+    const audit = buildResearchAudit({
+      discovered: Number(partialAudit.candidatesDiscovered) || 0,
+      exaRetrieved: Number(partialAudit.candidatesRetrievedByExa) || 0,
+      unique: Number(partialAudit.uniqueCompanies) || evidenceBundles.length,
+      evaluated: evidenceBundles.length,
+      rejected: Math.max(0, evidenceBundles.length - verified.length),
+      verified: verified.length,
+      signalBacked: verified.filter((lead: any) => lead.opportunitySignalType !== "none").length,
+      returned: finalResults.length,
+    });
+    console.log(`[lead-research] finalized ${JSON.stringify(audit)}`);
+    return res.json({ status: "done", results: finalResults, audit, evaluationAudit, validationStatus: "manus-led" });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || "Lead research finalization failed" });
+  }
+});
+
 api.post("/api/exa-search", async (req: Request, res: Response) => {
   const { query, queries, city, numResults = 5, business, category, memories = [] } = req.body;
   const candidateQueries = Array.from(new Set(
@@ -632,16 +1116,17 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         const scoped = city ? `${q} in ${city}` : q;
         const located = city ? `${q} located in ${city}, ${meta.country}` : q;
         const contextual = contextSuffix ? `${scoped} ${contextSuffix}` : scoped;
-        return useCountryDomains ? [scoped, contextual] : [scoped, located, contextual];
+        if (useCountryDomains) return [memoryContext ? contextual : scoped];
+        return memoryContext ? [located, contextual] : [scoped, located];
       })
     ));
 
-    const fetchExa = async (q: string, includeDomains?: string[]) => {
+    const fetchExa = async (q: string, includeDomains?: string[], resultCount = numResults + 5) => {
       const body: any = {
         query: q,
         type: "auto",
         category: "company",
-        numResults: numResults + 5, // fetch extra for post-filtering
+        numResults: resultCount,
         contents: {
           text: { maxCharacters: 2000 },
           highlights: true,
@@ -691,6 +1176,7 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
     // Process results
     const allResults = merged.map((r: any) => {
       const allText = [r.text || "", r.summary || "", ...(r.highlights || [])].join(" ");
+      const pageText = [r.text || "", ...(r.highlights || [])].join(" ");
       const emailMatch = allText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
       const linkedinMatch = allText.match(/https?:\/\/(?:www\.)?linkedin\.com\/company\/[a-zA-Z0-9\-_]+/);
       return {
@@ -703,7 +1189,8 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         _fullText: allText,
         // Real cached page text only — EXCLUDES Exa's query-conditioned summary,
         // which echoes the searched city into every result and breaks location checks.
-        _pageText: [r.text || "", ...(r.highlights || [])].join(" "),
+        _pageText: pageText,
+        _evidenceSources: [{ url: r.url || "#", pageText }],
         _url: (r.url || "").toLowerCase(),
         _host: hostOf(r.url || ""),
         _queryHits: Array.isArray(r._searchQueries) ? r._searchQueries.length : 1,
@@ -778,10 +1265,10 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
 
         const inTitleOrHost = meta.strictTerms.some(term => title.includes(term) || host.includes(term.replace(/\s+/g, "")));
         let inAddressLine = false;
+        const pageText = (r._pageText || "").toLowerCase();
         if (!inTitleOrHost) {
           // Scan the REAL page text (not the query-poisoned summary). Require the city
           // term itself next to an address marker — a mere country mention is too weak.
-          const pageText = (r._pageText || "").toLowerCase();
           for (const term of meta.strictTerms) {
             let idx = pageText.indexOf(term);
             while (idx !== -1) {
@@ -793,14 +1280,69 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
           }
         }
 
-        if (!inTitleOrHost && !inAddressLine) {
-          console.log(`[exa-search] DROP "${r.title}" (${host}) reason: city not in title/host/address line`);
-          drops++; return false;
+        const matchingCountryDomain = Boolean(hc && meta.country && hc === meta.country);
+        const cityMention = meta.strictTerms.some(term => pageText.includes(term));
+        r._locationSignals = {
+          matchingCountryDomain,
+          inTitleOrHost,
+          inAddressLine,
+          cityMention,
+        };
+        if (!inTitleOrHost && !inAddressLine && !matchingCountryDomain && !cityMention) {
+          console.log(`[exa-search] KEEP FOR MANUS "${r.title}" (${host}) location requires semantic verification`);
         }
         return true;
       });
       console.log(`[exa-search] post-filter kept=${results.length} dropped=${drops}`);
     }
+
+    // Exa's initial company result often contains only homepage snippets. Retrieve
+    // prerequisite-bearing pages from the strongest official domains before asking
+    // Manus to validate them. This keeps the total at no more than 12 Exa calls:
+    // up to 6 discovery calls plus up to 6 evidence-enrichment calls.
+    const priorityTokens = (value: string) => Array.from(new Set(String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .split(/\s+/)
+      .filter(token => token.length > 3 && !["with", "from", "that", "this", "their", "facility", "operator", "system", "treatment"].includes(token))));
+    const opportunityIdentityTokens = priorityTokens([
+      category?.name,
+      category?.whyRelevant,
+      category?.sharedPain,
+      ...(Array.isArray(category?.painPoints) ? category.painPoints : []),
+    ].filter(Boolean).join(" "));
+    const prerequisiteTokens = priorityTokens([...requiredEvidence, ...mandatorySignals].join(" "));
+    const vendorPattern = /\b(manufacturer|supplier|installer|installation|distributor|integrator|engineering (?:firm|company|solutions)|consultant|we supply|we install|design and build|equipment provider)\b/i;
+    const evidencePriority = (result: any) => {
+      const text = `${result.title || ""} ${result._pageText || ""}`;
+      const normalized = text.toLowerCase();
+      const mandatoryHits = matchMandatoryEvidence(text, mandatorySignals).length;
+      const identityHits = opportunityIdentityTokens.filter(token => normalized.includes(token)).length;
+      const prerequisiteKeywordHits = prerequisiteTokens.filter(token => normalized.includes(token)).length;
+      const location = result._locationSignals || {};
+      return mandatoryHits * 20 + identityHits * 5 + prerequisiteKeywordHits * 3 + (result._queryHits || 0) * 3 +
+        (location.inAddressLine ? 8 : 0) + (location.inTitleOrHost ? 6 : 0) +
+        (location.matchingCountryDomain ? 4 : 0) + (location.cityMention ? 2 : 0) -
+        (vendorPattern.test(text) ? 45 : 0);
+    };
+    const enrichmentBudget = Math.max(0, 12 - (searchQueries.length + (useCountryDomains ? baseQueries.length : 0)));
+    const enrichmentTargets = [...results]
+      .sort((a: any, b: any) => evidencePriority(b) - evidencePriority(a))
+      .slice(0, Math.min(6, enrichmentBudget));
+    const enrichmentSets = await Promise.all(enrichmentTargets.map((result: any) => {
+      const evidenceTerms = mandatorySignals.slice(0, 6).join(" OR ");
+      const evidenceQuery = `${result.title} ${city || ""} ${evidenceTerms}`.trim();
+      return fetchExa(evidenceQuery, result._host ? [result._host] : undefined, 3);
+    }));
+    enrichmentTargets.forEach((result: any, index: number) => {
+      for (const page of enrichmentSets[index] || []) {
+        if (hostOf(page.url || "") !== result._host) continue;
+        const pageText = [page.text || "", ...(page.highlights || [])].join(" ").trim();
+        if (!pageText) continue;
+        result._pageText = `${result._pageText || ""}\n${pageText}`.slice(0, 12_000);
+        result._evidenceSources.push({ url: page.url, pageText });
+      }
+    });
 
     const eligibilityGroups: Array<{ requirement: string; signals: string[] }> = prerequisiteItems.length
       ? prerequisiteItems.map((item: any) => ({
@@ -809,16 +1351,13 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
         }))
       : [{ requirement: "legacy required evidence", signals: requiredEvidence }];
     if (eligibilityGroups.some(group => group.signals.length)) {
-      results = results.filter((result: any) => {
+      results.forEach((result: any) => {
         const groupMatches = eligibilityGroups.map(group => ({
           requirement: group.requirement,
           matches: matchMandatoryEvidence(result._pageText || "", group.signals),
         }));
         result._mandatoryMatches = groupMatches.flatMap(group => group.matches);
         result._prerequisiteMatches = groupMatches;
-        if (groupMatches.every(group => group.matches.length > 0)) return true;
-        console.log(`[exa-search] DROP "${result.title}" (${result._host}) reason: mandatory buyer evidence not found`);
-        return false;
       });
     }
 
@@ -854,13 +1393,16 @@ api.post("/api/exa-search", async (req: Request, res: Response) => {
 
     const heuristicResults = results.map(scoreHeuristic);
     const validationCandidates = [...heuristicResults].sort((a: any, b: any) =>
-      (b.fitScore || 0) - (a.fitScore || 0) || (b._queryHits || 0) - (a._queryHits || 0)
+      evidencePriority(b) - evidencePriority(a) || (b.fitScore || 0) - (a.fitScore || 0)
     );
 
     let validationStatus: "manus" | "heuristic" | "failed" = "heuristic";
+    let validationAudit: any[] = [];
     try {
       if (process.env.MANUS_API_KEY && heuristicResults.length > 0) {
-        const validationPrompt = `You are validating B2B lead search results before they are shown to a user.
+        const candidatesForValidation = validationCandidates.slice(0, Math.min(6, Math.max(numResults, 5)));
+        console.log(`[exa-search] candidates selected for Manus: ${JSON.stringify(candidatesForValidation.map((item: any) => item.title))}`);
+        const buildValidationPrompt = (candidate: any) => `You are validating one B2B lead search result before it is shown to a user.
 
 Seller:
 ${JSON.stringify({
@@ -877,33 +1419,48 @@ ${memoryTexts.length ? memoryTexts.map((m: string, i: number) => `${i + 1}. ${m}
 
 City/country required: ${city || "Any"} ${meta.country ? `(${meta.country})` : ""}
 
-Candidate companies:
-${validationCandidates.slice(0, Math.max(numResults * 2, 12)).map((r: any, i: number) => `${i + 1}. ${JSON.stringify({
-  title: r.title,
-  url: r.url,
-  pageText: String(r._pageText || "").slice(0, 1200),
-  mandatoryPrerequisitesMatched: r._prerequisiteMatches,
-  queryHitCount: r._queryHits,
-})}`).join("\n")}
+Candidate company:
+${JSON.stringify({
+  title: candidate.title,
+  url: candidate.url,
+  officialSiteEvidence: (candidate._evidenceSources || []).slice(0, 3).map((source: any) => ({
+    url: source.url,
+    pageText: String(source.pageText || "").slice(0, 1000),
+  })),
+  locationSignals: candidate._locationSignals,
+  mandatoryPrerequisitesMatched: candidate._prerequisiteMatches,
+  queryHitCount: candidate._queryHits,
+})}
 
 Return ONLY valid JSON. Validate that each lead is a real operating company, in the correct location, relevant to the selected opportunity, and supported by evidence.
+
+DECISION CONTRACT (do not silently strengthen these rules):
+- Return exactly one result record for the supplied candidate with the same company URL. Include the record even when rejected, using false fields and rejectReason; never return an empty results array.
+- Treat alternatives joined by "or" in a prerequisite as alternatives. Verifying any one acceptable signal is sufficient unless the selected opportunity explicitly says otherwise.
+- The supplied acceptableSignals define what counts as evidence. Do not require fixed filtration, procurement authority, budget, scale, or another condition unless that exact condition appears in the selected opportunity's prerequisite or disqualifiers.
+- A disqualifier applies only when supplied page evidence explicitly proves it. Uncertainty, missing detail, "outdoor", or a possible concern is not a disqualifier.
+- If an official page explicitly says the target operator offers a listed acceptable facility (for example cold plunge), set requiredEvidenceVerified and eligibilityPass true.
+- A candidate passing all required checks must receive fitScore 3-5. Use fitScore 1-2 only for a rejected candidate.
+- rejectReason must be empty only when every required check is true; otherwise state the failed check.
 
 For every candidate set these verification fields explicitly:
 - isRealCompany: the evidence identifies a specific legal or trading business.
 - isOperating: the page contains current services, contact, booking, location, or other evidence that it still operates.
 - locationVerified: the supplied page evidence verifies the requested city/country, not merely a service area or query-generated summary.
 - isPrimaryCompanySource: the URL is the company's own website, not a directory, social profile, article, or aggregator.
+- isTargetBuyer: the company operates in the selected opportunity market and would buy/use the seller's capability. Set false for vendors, installers, distributors, consultants, manufacturers, or competitors selling the same type of solution.
+- buyerRoleEvidence: a verbatim quotation showing that the company is the target operator/buyer rather than a solution vendor.
 - requiredEvidenceVerified: page evidence satisfies at least one required buyer condition; use true when no required evidence was supplied.
 - eligibilityPass: true only when mandatory buyer evidence is verified from pageText.
 - verifiedAddress: the location-bearing address or branch text from pageText; empty when it cannot be verified.
 - evidenceQuote: a verbatim quotation from pageText proving the mandatory condition. Never use or paraphrase a search summary.
-- evidenceUrl: the exact candidate URL containing the quotation.
+- evidenceUrl: the exact supplied official-site evidence URL containing the quotation; it may be a subpage on the candidate's own domain.
 - rejectReason: concise reason when any verification field is false, otherwise an empty string.
 - disqualifiers: concrete disqualifying evidence; return an empty array only when none is present.
 
-Only return candidate URLs supplied above. Do not invent or substitute URLs. Mark unverifiable claims false. Reject or score low if a result is a directory/blog/article, wrong country/city, not operating, lacks a required buyer condition, or is only keyword-adjacent.`;
+Only return candidate companies and official-site evidence URLs supplied above. Do not invent or substitute URLs. Mark unverifiable claims false. Reject or score low if a result is a directory/blog/article, wrong country/city, not operating, lacks a required buyer condition, or is only keyword-adjacent.`;
 
-        const validated = await manusTask<any>(validationPrompt, {
+        const validationSchema = {
           type: "object",
           properties: {
             results: {
@@ -914,7 +1471,7 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
                   title: { type: "string" },
                   url: { type: "string" },
                   summary: { type: "string" },
-                  fitScore: { type: "number" },
+                  fitScore: { type: "number", minimum: 1, maximum: 5 },
                   evidence: { type: "string" },
                   whyThisCompanyFits: { type: "string" },
                   disqualifiers: { type: "array", items: { type: "string" } },
@@ -924,6 +1481,8 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
                   isOperating: { type: "boolean" },
                   locationVerified: { type: "boolean" },
                   isPrimaryCompanySource: { type: "boolean" },
+                  isTargetBuyer: { type: "boolean" },
+                  buyerRoleEvidence: { type: "string" },
                   requiredEvidenceVerified: { type: "boolean" },
                   eligibilityPass: { type: "boolean" },
                   verifiedAddress: { type: "string" },
@@ -931,28 +1490,69 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
                   evidenceUrl: { type: "string" },
                   rejectReason: { type: "string" },
                 },
-                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed", "isRealCompany", "isOperating", "locationVerified", "isPrimaryCompanySource", "requiredEvidenceVerified", "eligibilityPass", "verifiedAddress", "evidenceQuote", "evidenceUrl", "rejectReason"],
+                required: ["title", "url", "summary", "fitScore", "evidence", "whyThisCompanyFits", "disqualifiers", "contextApplied", "memoriesUsed", "isRealCompany", "isOperating", "locationVerified", "isPrimaryCompanySource", "isTargetBuyer", "buyerRoleEvidence", "requiredEvidenceVerified", "eligibilityPass", "verifiedAddress", "evidenceQuote", "evidenceUrl", "rejectReason"],
                 additionalProperties: false,
               },
             },
           },
           required: ["results"],
           additionalProperties: false,
-        }, { timeoutMs: 90_000, pollMs: 2_000, profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6" });
-
+        };
         const candidateKey = (value: string) => String(value || "").toLowerCase().replace(/\/$/, "");
+        const validationSettled = await Promise.allSettled(candidatesForValidation.map(async (candidate: any) => {
+          let candidateResult: any = null;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const validated = await manusTask<any>(buildValidationPrompt(candidate), validationSchema, {
+              timeoutMs: 90_000,
+              pollMs: 2_000,
+              profile: process.env.MANUS_REASONING_PROFILE || "manus-1.6",
+            });
+            candidateResult = Array.isArray(validated?.results) ? validated.results[0] : null;
+            if (candidateResult && candidateKey(candidateResult.url) === candidateKey(candidate.url)) return candidateResult;
+            console.warn(`[exa-search] Manus omitted validation for ${candidate.title}; retrying`);
+          }
+          throw new Error(`Manus returned no validation record for ${candidate.title}`);
+        }));
+        const validated = {
+          results: validationSettled.flatMap(item => item.status === "fulfilled" ? [item.value] : []),
+        };
+        const validationFailures = validationSettled.filter(item => item.status === "rejected").length;
+        if (validationFailures) console.warn(`[exa-search] ${validationFailures}/${candidatesForValidation.length} individual validations failed`);
+        if (!validated.results.length) throw new Error("Manus returned no complete individual validations");
+
         const byUrl = new Map(heuristicResults.map((r: any) => [candidateKey(r.url), r]));
+        validationAudit = (validated.results || []).map((item: any) => ({
+          title: item.title,
+          url: item.url,
+          isRealCompany: item.isRealCompany,
+          isOperating: item.isOperating,
+          locationVerified: item.locationVerified,
+          isPrimaryCompanySource: item.isPrimaryCompanySource,
+          isTargetBuyer: item.isTargetBuyer,
+          requiredEvidenceVerified: item.requiredEvidenceVerified,
+          eligibilityPass: item.eligibilityPass,
+          fitScore: item.fitScore,
+          evidenceQuote: item.evidenceQuote,
+          evidenceUrl: item.evidenceUrl,
+          verifiedAddress: item.verifiedAddress,
+          buyerRoleEvidence: item.buyerRoleEvidence,
+          disqualifiers: item.disqualifiers,
+          rejectReason: item.rejectReason,
+        }));
+        console.log(`[exa-search] Manus validation audit: ${JSON.stringify(validationAudit)}`);
         results = (validated.results || [])
           .filter((v: any) => byUrl.has(candidateKey(v.url)))
           .map((v: any) => ({ ...byUrl.get(candidateKey(v.url)), ...v }))
           .filter((r: any) => {
             const source = byUrl.get(candidateKey(r.url));
-            const normalizedPage = String(source?._pageText || "").toLowerCase().replace(/\s+/g, " ");
             const normalizedQuote = String(r.evidenceQuote || "").toLowerCase().replace(/\s+/g, " ").trim();
+            const evidenceSource = (source?._evidenceSources || []).find((item: any) => candidateKey(item.url) === candidateKey(r.evidenceUrl));
+            const normalizedPage = String(evidenceSource?.pageText || "").toLowerCase().replace(/\s+/g, " ");
+            const sameOfficialDomain = hostOf(r.evidenceUrl || "") === source?._host;
             const quoteVerified = normalizedQuote.length >= 15 && normalizedPage.includes(normalizedQuote);
-            return r.isRealCompany && r.isOperating && (!city || r.locationVerified) && r.isPrimaryCompanySource && r.eligibilityPass &&
+            return r.isRealCompany && r.isOperating && (!city || r.locationVerified) && r.isPrimaryCompanySource && r.isTargetBuyer && r.eligibilityPass &&
               (!requiredEvidence.length || r.requiredEvidenceVerified) && (!Array.isArray(r.disqualifiers) || r.disqualifiers.length === 0) &&
-              quoteVerified && candidateKey(r.evidenceUrl) === candidateKey(r.url) && r.fitScore >= 3;
+              quoteVerified && sameOfficialDomain && r.fitScore >= 3;
           })
           .sort((a: any, b: any) => (b.fitScore || 0) - (a.fitScore || 0));
         validationStatus = "manus";
@@ -975,6 +1575,8 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
       _queryHits,
       _mandatoryMatches,
       _prerequisiteMatches,
+      _evidenceSources,
+      _locationSignals,
       ...rest
     }: any) => rest);
 
@@ -990,9 +1592,10 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
           ...item,
           contextApplied: memoryTexts.length ? ["mem0", "required evidence", "capability model"] : ["required evidence", "capability model fallback"],
         })),
-        exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
+        exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0) + enrichmentTargets.length,
         validationStatus,
         rejectedCount: allResults.length,
+        validationAudit,
       });
     }
 
@@ -1002,9 +1605,10 @@ Only return candidate URLs supplied above. Do not invent or substitute URLs. Mar
         ...item,
         contextApplied: memoryTexts.length ? ["mem0", "required evidence", "capability model"] : ["required evidence", "capability model fallback"],
       })),
-      exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0),
+      exaRequestCount: searchQueries.length + (useCountryDomains ? baseQueries.length : 0) + enrichmentTargets.length,
       validationStatus,
       rejectedCount: Math.max(0, allResults.length - results.length),
+      validationAudit,
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
