@@ -24,7 +24,16 @@ export default function AccountsStep({
   const [city, setCity] = useState("Singapore");
   const [searching, setSearching] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
-  const [searchAudit, setSearchAudit] = useState<{ queries: string[]; rejectedCount: number; validationStatus?: string } | null>(null);
+  const [searchAudit, setSearchAudit] = useState<{
+    candidatesDiscovered: number;
+    candidatesRetrievedByExa: number;
+    uniqueCompanies: number;
+    companiesEvaluated: number;
+    eligibilityRejections: number;
+    verifiedFacilities: number;
+    leadsWithTimelySignals: number;
+    finalLeadsReturned: number;
+  } | null>(null);
 
   const cityOptions = [
     "Singapore",
@@ -48,18 +57,42 @@ export default function AccountsStep({
   const searchLeads = async () => {
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
-    const queries = cat.searchQueries?.length ? cat.searchQueries : [`${cat.name} premium`];
 
     try {
-      setSearchMessage("");
       setSearchAudit(null);
       setLeads([]);
-      const res = await apiFetch("/api/exa-search", {
+      setSearchMessage("Manus is planning the buyer search and evidence criteria...");
+      const startRes = await apiFetch("/api/lead-research/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: queries[0],
-          queries,
+          city,
+          business,
+          category: cat,
+          memories: memories.map(m => m.text),
+        }),
+      });
+      const startData = await startRes.json();
+      if (!startRes.ok) throw new Error(startData.error || "Lead research failed to start");
+
+      let discovery: any = null;
+      for (let attempt = 0; attempt < 240; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const pollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(startData.taskId)}`);
+        const pollData = await pollRes.json();
+        if (!pollRes.ok || pollData.error) throw new Error(pollData.error || "Manus search planning failed");
+        if (pollData.status === "error") throw new Error(pollData.message || "Manus search planning failed");
+        if (pollData.status === "done") { discovery = pollData.result; break; }
+        setSearchMessage(pollData.message || "Manus is planning the buyer search...");
+      }
+      if (!discovery) throw new Error("Manus search planning timed out before completing");
+
+      setSearchMessage("Exa is corroborating facilities, locations, and expansion signals...");
+      const corroborateRes = await apiFetch("/api/lead-research/corroborate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          discovery,
           city,
           numResults: 8,
           business,
@@ -67,18 +100,36 @@ export default function AccountsStep({
           memories: memories.map(m => m.text),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Lead search failed");
-      if (data.message) {
-        setSearchMessage(data.message);
+      const corroborateData = await corroborateRes.json();
+      if (!corroborateRes.ok) throw new Error(corroborateData.error || "Evidence corroboration failed");
+
+      setSearchMessage("Manus is comparing verified candidates and ranking why-now opportunities...");
+      let rankingResult: any = null;
+      for (let attempt = 0; attempt < 240; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const rankPollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(corroborateData.taskId)}`);
+        const rankPollData = await rankPollRes.json();
+        if (!rankPollRes.ok || rankPollData.error) throw new Error(rankPollData.error || "Strategic ranking failed");
+        if (rankPollData.status === "error") throw new Error(rankPollData.message || "Strategic ranking failed");
+        if (rankPollData.status === "done") { rankingResult = rankPollData.result; break; }
+        setSearchMessage(rankPollData.message || "Manus is ranking verified opportunities...");
       }
-      setSearchAudit({
-        queries: Array.isArray(data.querySelection)
-          ? data.querySelection.map((item: any) => item.query).filter(Boolean)
-          : [],
-        rejectedCount: data.rejectedCount || 0,
-        validationStatus: data.validationStatus,
+      if (!rankingResult) throw new Error("Strategic ranking timed out before completing");
+      const finalRes = await apiFetch("/api/lead-research/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rankingResult,
+          evidenceBundles: corroborateData.evidenceBundles,
+          partialAudit: corroborateData.partialAudit,
+          numResults: 8,
+          memories: memories.map(m => m.text),
+        }),
       });
+      const data = await finalRes.json();
+      if (!finalRes.ok || data.error) throw new Error(data.error || "Lead finalization failed");
+      setSearchAudit(data.audit || null);
+      setSearchMessage(data.results?.length ? "" : "No companies passed every facility, location, operating, and buyer verification check.");
       const scored = (data.results || []).map((r: any) => ({
         ...r,
         name: r.title,
@@ -250,7 +301,7 @@ export default function AccountsStep({
           </p>
           {searchAudit && (
             <div style={{ marginTop: 10, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
-              {searchAudit.queries.length} selected queries · {searchAudit.rejectedCount} candidates rejected · {searchAudit.validationStatus || "validated"}
+              {searchAudit.candidatesDiscovered} discovered · {searchAudit.uniqueCompanies} unique · {searchAudit.companiesEvaluated} evaluated · {searchAudit.verifiedFacilities} verified · {searchAudit.leadsWithTimelySignals} timely signals · {searchAudit.finalLeadsReturned} returned
             </div>
           )}
         </div>
@@ -277,7 +328,7 @@ export default function AccountsStep({
               borderTopColor: "var(--sage)", borderRadius: "50%",
               animation: "spin 0.7s linear infinite",
             }} />
-            <p style={{ color: "var(--ink-3)", fontSize: 13, marginTop: 12 }}>Searching with Exa...</p>
+            <p style={{ color: "var(--ink-3)", fontSize: 13, marginTop: 12 }}>{searchMessage || "Researching and verifying leads..."}</p>
           </div>
         )}
 
@@ -333,6 +384,21 @@ export default function AccountsStep({
                       <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
                         {lead.whyThisCompanyFits}
                       </div>
+                    </>
+                  )}
+                  {lead.whyNow && (
+                    <>
+                      <div style={{ ...fieldLabel, marginTop: 10 }}>
+                        Why Now{lead.opportunityPriority ? ` · Priority ${lead.opportunityPriority}` : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
+                        {lead.whyNow}
+                      </div>
+                      {lead.opportunitySignalSource && (
+                        <a href={lead.opportunitySignalSource} target="_blank" rel="noopener" style={{ display: "inline-block", marginTop: 5, fontSize: 11, color: "var(--sage-strong)" }}>
+                          View opportunity signal{lead.opportunitySignalDate ? ` · ${lead.opportunitySignalDate}` : ""}
+                        </a>
+                      )}
                     </>
                   )}
                   {lead.disqualifiers && lead.disqualifiers.length > 0 && (

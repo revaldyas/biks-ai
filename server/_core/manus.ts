@@ -273,6 +273,9 @@ export async function checkManusTask(taskId: string): Promise<ManusTaskStatus> {
     if (content) {
       const extracted = extractJson(content);
       if (extracted != null) return { status: "done", result: extracted };
+      if (/Qualifying Leads|Fit Score|Opportunity Signal/i.test(content)) {
+        return { status: "done", result: { rawText: content } };
+      }
     }
 
     return { status: "error", message: "Agent stopped but returned no parseable output" };
