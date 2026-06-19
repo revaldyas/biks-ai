@@ -386,7 +386,7 @@ describe("API route handlers", () => {
     }
   });
 
-  it("corroborates every Manus candidate with Exa and starts comparative ranking", async () => {
+  it("corroborates selected candidates with production-safe Exa calls and starts comparative ranking", async () => {
     const originalExa = process.env.EXA_API_KEY;
     const originalManus = process.env.MANUS_API_KEY;
     process.env.EXA_API_KEY = "test-exa-key";
@@ -399,14 +399,7 @@ describe("API route handlers", () => {
       if (url === "https://api.exa.ai/search") {
         const request = JSON.parse(String(init?.body || "{}"));
         exaRequests.push(request);
-        const isSignal = String(request.query).includes("expansion OR");
-        return new Response(JSON.stringify({ results: isSignal ? [{
-          title: "Example Recovery Club announces expansion",
-          url: "https://news.example.test/example-expands",
-          text: "On 1 May 2026, Example Recovery Club announced a new Jakarta location.",
-          publishedDate: "2026-05-01",
-          highlights: [],
-        }] : [{
+        return new Response(JSON.stringify({ results: [{
           title: "Example Recovery Club",
           url: "https://example.test/locations/singapore",
           text: "Example Recovery Club operates two cold plunge pools in Singapore. Book recovery services online.",
@@ -460,9 +453,72 @@ describe("API route handlers", () => {
       expect(exaRequests.slice(1, 4).every((request: any) => !/site:/i.test(request.query))).toBe(true);
       expect(exaRequests[0]).not.toHaveProperty("excludeDomains");
       expect(exaRequests[0]).not.toHaveProperty("startPublishedDate");
+      expect(exaRequests.some((request: any) => String(request.query).includes("expansion OR"))).toBe(false);
       expect(taskBodies[0].message.content).toContain("Evaluate the complete supplied set before selecting finalists");
       expect(taskBodies[0].message.content).toContain("Return up to 12 candidates");
-      expect(taskBodies[0].message.content).toContain("new Jakarta location");
+      expect(taskBodies[0].message.content).toContain("Example Recovery Club operates two cold plunge pools in Singapore");
+    } finally {
+      close();
+      fetchSpy.mockRestore();
+      if (originalExa) process.env.EXA_API_KEY = originalExa; else delete process.env.EXA_API_KEY;
+      if (originalManus) process.env.MANUS_API_KEY = originalManus; else delete process.env.MANUS_API_KEY;
+    }
+  });
+
+  it("caps corroboration candidates to avoid Vercel function timeouts", async () => {
+    const originalExa = process.env.EXA_API_KEY;
+    const originalManus = process.env.MANUS_API_KEY;
+    process.env.EXA_API_KEY = "test-exa-key";
+    process.env.MANUS_API_KEY = "test-manus-key";
+    const originalFetch = globalThis.fetch;
+    const exaRequests: any[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      const url = String(input);
+      if (url === "https://api.exa.ai/search") {
+        const request = JSON.parse(String(init?.body || "{}"));
+        exaRequests.push(request);
+        const results = request.category === "company"
+          ? Array.from({ length: 20 }, (_, index) => ({
+            title: `Recovery Club ${index + 1}`,
+            url: `https://recovery-club-${index + 1}.example/singapore`,
+            text: `Recovery Club ${index + 1} operates a cold plunge facility in Singapore with online booking.`,
+            highlights: [],
+          }))
+          : [];
+        return new Response(JSON.stringify({ results }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "https://api.manus.ai/v2/task.create") {
+        return new Response(JSON.stringify({ ok: true, task_id: "ranking-task" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return originalFetch(input, init);
+    });
+    const app = createTestApp();
+    const { port, close } = await startServer(app);
+    try {
+      const response = await fetch(`http://localhost:${port}/api/lead-research/corroborate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          discovery: {
+            discoveryQueries: ["recovery club cold plunge Singapore"],
+            evidenceSignals: ["cold plunge"],
+            disqualifiers: ["equipment seller"],
+            signalQueries: ["expansion new location"],
+            buyerDefinition: "An operator of recovery facilities",
+          },
+          business: { companyName: "Seller", capabilityModel: { capabilities: ["water treatment"] } },
+          category: { name: "Recovery Clubs", mustHaveEvidence: [{ requirement: "Operates a cold plunge", acceptableSignals: ["cold plunge"] }] },
+          city: "Singapore",
+          numResults: 8,
+          memories: [],
+        }),
+      });
+      const data = await response.json();
+      expect(response.status).toBe(200);
+      expect(data.evidenceBundles).toHaveLength(12);
+      expect(data.partialAudit).toMatchObject({ candidatesDiscovered: 12, uniqueCompanies: 12 });
+      expect(exaRequests).toHaveLength(4);
+      expect(exaRequests.some((request: any) => String(request.query).includes("expansion OR"))).toBe(false);
     } finally {
       close();
       fetchSpy.mockRestore();

@@ -663,6 +663,7 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
   const plannedQueries = Array.isArray(discovery?.discoveryQueries) ? discovery.discoveryQueries.map(String).filter(Boolean).slice(0, 3) : [];
   if (!plannedQueries.length) return res.status(400).json({ error: "Manus returned no search plan" });
 
+  const startedAt = Date.now();
   try {
     const prerequisiteItems = Array.isArray(category?.mustHaveEvidence) ? category.mustHaveEvidence : [];
     const mandatorySignals = Array.from(new Set([
@@ -673,6 +674,7 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
     const facilitySignals = extractFacilityKeywords(mandatorySignals);
     const evidenceSignals = facilitySignals.length ? facilitySignals : mandatorySignals;
     const sourceText = (result: any) => [result.text || "", ...(result.highlights || [])].join(" ").replace(/\s+/g, " ").trim();
+    let exaSearchCalls = 0;
     const fetchExa = async (query: string, includeDomains: string[] = [], resultCount = 5, companyOnly = false) => {
       const body: any = {
         query,
@@ -682,12 +684,27 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
       };
       if (companyOnly) body.category = "company";
       if (includeDomains.length) body.includeDomains = includeDomains;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const response = await fetch("https://api.exa.ai/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": exaKey },
-          body: JSON.stringify(body),
-        });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        exaSearchCalls += 1;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
+        let response: globalThis.Response;
+        try {
+          response = await fetch("https://api.exa.ai/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": exaKey },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } catch (error: any) {
+          clearTimeout(timer);
+          console.warn(`[lead-research] Exa request failed attempt=${attempt + 1} query=${query} error=${error?.message || error}`);
+          if (attempt === 1) return [];
+          await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
+          continue;
+        } finally {
+          clearTimeout(timer);
+        }
         if (response.ok) {
           const data: any = await response.json();
           return Array.isArray(data.results) ? data.results : [];
@@ -697,7 +714,7 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
           return [];
         }
         const retryAfter = Number(response.headers.get("retry-after")) * 1000;
-        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1200 * (attempt + 1);
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 700 * (attempt + 1);
         console.warn(`[lead-research] Exa retry status=${response.status} attempt=${attempt + 1} delayMs=${delay}`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
@@ -765,8 +782,27 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
           discoveryQuery: originQuery,
           companySearchQuery,
           initialText: text,
+          initialResults: [{
+            url: result.url,
+            title: result.title,
+            text,
+            highlights: result.highlights || [],
+            publishedDate: result.publishedDate || "",
+          }],
           queryHits: 1,
         });
+      }
+      if (existing) {
+        const url = String(result.url || "");
+        if (url && !existing.initialResults.some((item: any) => item.url === url) && existing.initialResults.length < 5) {
+          existing.initialResults.push({
+            url,
+            title: result.title,
+            text,
+            highlights: result.highlights || [],
+            publishedDate: result.publishedDate || "",
+          });
+        }
       }
     };
     for (const result of broadResults) {
@@ -786,15 +822,12 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
     const uniqueCandidates = Array.from(candidates.values())
       .sort((a, b) => candidatePriority(b) - candidatePriority(a))
       .filter(candidate => candidatePriority(candidate) > -20)
-      .slice(0, 20);
+      .slice(0, 12);
+    console.log(`[lead-research] discovery_complete candidates=${uniqueCandidates.length} exaSearchCalls=${exaSearchCalls} durationMs=${Date.now() - startedAt}`);
 
-    const evidenceBundles = await mapInBatches(uniqueCandidates, 5, async candidate => {
+    const evidenceBundles = await mapInBatches(uniqueCandidates, 6, async candidate => {
       const officialHost = normalizeHost(candidate.officialWebsite || "");
       const evidenceTerms = evidenceSignals.slice(0, 5).join(" OR ");
-      const [officialResults, signalResults] = await Promise.all([
-        officialHost ? fetchExa(`${candidate.name} ${evidenceTerms} ${city}`, [officialHost], 5) : Promise.resolve([]),
-        fetchExa(`"${candidate.name}" expansion OR "new location" OR opening OR launch OR construction OR funding OR partnership OR hiring`, [], 5),
-      ]);
       const sourcesByUrl = new Map<string, ResearchSource>();
       const addResearchResult = (result: any) => {
         const pageText = sourceText(result);
@@ -815,11 +848,18 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
         const existing = sourcesByUrl.get(source.url);
         if (!existing || source.pageText.length > existing.pageText.length) sourcesByUrl.set(source.url, source);
       };
-      for (const result of [...officialResults, ...signalResults]) addResearchResult(result);
+      for (const result of candidate.initialResults || []) addResearchResult(result);
       let sources = Array.from(sourcesByUrl.values()).slice(0, 8);
       let facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
       const locationTerms = [city, candidate.operatingLocation].filter(Boolean).map(String);
       let locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
+      if (officialHost && evidenceTerms && !facilitySource) {
+        const officialResults = await fetchExa(`${candidate.name} ${evidenceTerms} ${city}`, [officialHost], 5);
+        for (const result of officialResults) addResearchResult(result);
+        sources = Array.from(sourcesByUrl.values()).slice(0, 8);
+        facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
+        locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
+      }
       if (officialHost && facilitySource && !locationSource) {
         const locationResults = await fetchExa(`${candidate.name} ${city} address location opening hours contact`, [officialHost], 3);
         for (const result of locationResults) addResearchResult(result);
@@ -874,9 +914,9 @@ Rules:
 - A candidate passes only when it is a real operating target operator/buyer in ${city}, and the supplied evidence proves at least one required facility condition.
 - Reject manufacturers, equipment sellers, installers, consultants, distributors, and competitors.
 - Use only supplied evidence URLs and text. Do not invent or replace URLs, facts, dates, or companies.
-- opportunitySignal is separate from baseline eligibility. Use expansion, new-location, construction, launch, funding, hiring, partnership, procurement, or operational-change evidence when present.
-- opportunitySignalDate must be an explicit source-supported ISO date. Leave all opportunity-signal fields empty if the date or claim is unsupported.
-- Compare candidates and explain the concrete seller-to-buyer fit and why the timing matters.
+- If supplied evidence contains expansion, new-location, construction, launch, funding, hiring, partnership, procurement, or operational-change evidence, include it as opportunitySignal.
+- opportunitySignalDate must be an explicit source-supported ISO date. Leave all opportunity-signal fields empty if the date or claim is unsupported. Do not penalize otherwise eligible leads when no timing signal is supplied.
+- Compare candidates and explain the concrete seller-to-buyer fit. For whyNow, use verified buying timing only when present; otherwise explain the verified capability fit.
 - Every returned evaluation must pass all baseline checks and receive fitScore 3-5 with an empty rejectReason.
 - Evaluate the complete supplied set before selecting finalists. The application performs deterministic evidence checks and applies the final cap after your comparison.`;
     const taskId = await startManusTask(finalPrompt, leadRankingSchema, {
@@ -886,8 +926,9 @@ Rules:
       candidatesDiscovered: uniqueCandidates.length,
       candidatesRetrievedByExa: broadResults.length + webDiscoveryResults.length,
       uniqueCompanies: evidenceBundles.length,
+      exaSearchCalls,
     };
-    console.log(`[lead-research] corroboration_complete taskId=${taskId} ${JSON.stringify(partialAudit)}`);
+    console.log(`[lead-research] corroboration_complete taskId=${taskId} durationMs=${Date.now() - startedAt} ${JSON.stringify(partialAudit)}`);
     return res.json({ taskId, phase: "ranking", evidenceBundles, partialAudit, companySearchQuery, numResults: Math.min(8, Math.max(1, Number(numResults) || 8)) });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Evidence corroboration failed" });
