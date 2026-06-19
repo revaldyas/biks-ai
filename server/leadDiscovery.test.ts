@@ -1,11 +1,60 @@
 import { describe, expect, it } from "vitest";
 import {
+  hostMatchesBlocklist,
   lowQualitySourceReason,
   matchMandatoryEvidence,
   selectStrongestQueries,
   splitMemoryPolarity,
   stripLocationTerms,
+  wordPresent,
 } from "./leadDiscovery";
+
+describe("hostMatchesBlocklist (fix A: precise host filtering)", () => {
+  const list = ["facebook.com", "clutch.co", "yellowpages"]; // dotted + bare token
+
+  it("blocks exact and subdomain matches of dotted entries", () => {
+    expect(hostMatchesBlocklist("facebook.com", list)).toBe(true);
+    expect(hostMatchesBlocklist("m.facebook.com", list)).toBe(true);
+    expect(hostMatchesBlocklist("clutch.co", list)).toBe(true);
+  });
+
+  it("does NOT reject a real site that merely contains a blocked token", () => {
+    expect(hostMatchesBlocklist("clutch.com", list)).toBe(false);   // the headline bug
+    expect(hostMatchesBlocklist("notfacebook.com", list)).toBe(false);
+  });
+
+  it("blocks a bare token only on a whole domain label", () => {
+    expect(hostMatchesBlocklist("yellowpages.com", list)).toBe(true);
+    expect(hostMatchesBlocklist("sg.yellowpages.com", list)).toBe(true);
+    expect(hostMatchesBlocklist("myyellowpages.com", list)).toBe(false);
+  });
+});
+
+describe("lowQualitySourceReason does not drop clutch.com (fix A integration)", () => {
+  it("passes a real .com that contains a blocked .co token", () => {
+    expect(lowQualitySourceReason("https://clutch.com/profile/acme", "Acme")).toBeNull();
+  });
+  it("still blocks the actual directory host", () => {
+    expect(lowQualitySourceReason("https://clutch.co/profile/acme", "Acme")).not.toBeNull();
+  });
+});
+
+describe("wordPresent (fix B: whole-word, plural-tolerant matching)", () => {
+  it("rejects coincidental substrings", () => {
+    expect(wordPresent("our product categories", "cat")).toBe(false);
+    expect(wordPresent("we sell a plunger tool", "plunge")).toBe(false);
+    expect(wordPresent("he was scolded", "cold")).toBe(false);
+  });
+  it("matches whole words and simple plurals, including hyphen compounds", () => {
+    expect(wordPresent("cold-plunge pool", "plunge")).toBe(true);
+    expect(wordPresent("two saunas and spas", "spa")).toBe(true);
+    expect(wordPresent("heated pools onsite", "pool")).toBe(true);
+  });
+  it("handles accented words (ASCII \\b would fail)", () => {
+    expect(wordPresent("our lovely café corner", "café")).toBe(true);
+    expect(wordPresent("café lounge", "caf")).toBe(false);  // not a partial of café
+  });
+});
 
 describe("lead discovery query selection", () => {
   it("prioritizes mem0 and required-evidence queries while keeping diversity", () => {

@@ -87,6 +87,7 @@ export default function AccountsStep({
       if (!startRes.ok) throw new Error(startData.error || "Lead research failed to start");
 
       let discovery: any = null;
+      let initPolls = 0;
       for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         const pollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(startData.taskId)}`);
@@ -94,6 +95,10 @@ export default function AccountsStep({
         if (!pollRes.ok || pollData.error) throw new Error(pollData.error || "Manus search planning failed");
         if (pollData.status === "error") throw new Error(pollData.message || "Manus search planning failed");
         if (pollData.status === "done") { discovery = pollData.result; break; }
+        // A task stuck "initializing" (persistent 404) is dead — bail after ~45s.
+        if (pollData.phase === "initializing") {
+          if (++initPolls >= 15) throw new Error("Manus task did not start (no response after 45s). Please try again.");
+        } else initPolls = 0;
         setSearchMessage(pollData.message || "Manus is planning the buyer search...");
       }
       if (!discovery) throw new Error("Manus search planning timed out before completing");
@@ -116,6 +121,7 @@ export default function AccountsStep({
 
       setSearchMessage("Manus is comparing verified candidates and ranking why-now opportunities...");
       let rankingResult: any = null;
+      let rankInitPolls = 0;
       for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         const rankPollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(corroborateData.taskId)}`);
@@ -123,6 +129,10 @@ export default function AccountsStep({
         if (!rankPollRes.ok || rankPollData.error) throw new Error(rankPollData.error || "Strategic ranking failed");
         if (rankPollData.status === "error") throw new Error(rankPollData.message || "Strategic ranking failed");
         if (rankPollData.status === "done") { rankingResult = rankPollData.result; break; }
+        // A task stuck "initializing" (persistent 404) is dead — bail after ~45s.
+        if (rankPollData.phase === "initializing") {
+          if (++rankInitPolls >= 15) throw new Error("Manus ranking did not start (no response after 45s). Please try again.");
+        } else rankInitPolls = 0;
         setSearchMessage(rankPollData.message || "Manus is ranking verified opportunities...");
       }
       if (!rankingResult) throw new Error("Strategic ranking timed out before completing");
@@ -143,7 +153,7 @@ export default function AccountsStep({
       setSearchMessage(data.results?.length ? "" : "No companies passed every facility, location, operating, and buyer verification check.");
       const scored = (data.results || []).map((r: any) => ({
         ...r,
-        name: r.title,
+        name: r.displayName || r.title,
         email: r.email || null,
         linkedinUrl: r.linkedinUrl || null,
         fitScore: Number.isFinite(r.fitScore) ? r.fitScore : 1,
@@ -358,12 +368,12 @@ export default function AccountsStep({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={fieldLabel}>Company Name</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, marginBottom: 12 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: "60%" }}>
                       {lead.name}
                     </span>
-                    {lead.verifiedAddress && (
-                      <span style={{ fontSize: 10, color: "var(--ink-3)", background: "var(--surface-sunk)", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
-                        {lead.verifiedAddress}
+                    {lead.displayLocation && (
+                      <span style={{ fontSize: 10, color: "var(--ink-3)", background: "var(--surface-sunk)", padding: "2px 6px", borderRadius: 4, flexShrink: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 }}>
+                        {lead.displayLocation}
                       </span>
                     )}
                     <a href={lead.url} target="_blank" rel="noopener" style={{ fontSize: 11, color: "var(--ink-3)", textDecoration: "none" }}>
@@ -379,9 +389,9 @@ export default function AccountsStep({
                     </a>
                   </div>
                   <div style={fieldLabel}>Evidence</div>
-                  <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2 }}>
-                    {(lead.evidenceQuote || lead.evidence || lead.summary)
-                      ? `${(lead.evidenceQuote || lead.evidence || lead.summary).slice(0, 220)}${(lead.evidenceQuote || lead.evidence || lead.summary).length > 220 ? "..." : ""}`
+                  <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.5, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    {(lead.cleanEvidence || lead.evidenceQuote || lead.evidence || lead.summary)
+                      ? (lead.cleanEvidence || `${(lead.evidenceQuote || lead.evidence || lead.summary).slice(0, 220)}${(lead.evidenceQuote || lead.evidence || lead.summary).length > 220 ? "..." : ""}`)
                       : "No evidence text available."}
                   </div>
                   {lead.evidenceUrl && (

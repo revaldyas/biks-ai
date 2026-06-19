@@ -214,7 +214,7 @@ export async function startManusTask(
 }
 
 export type ManusTaskStatus =
-  | { status: "running"; pct: number; message: string; detail: string }
+  | { status: "running"; pct: number; message: string; detail: string; phase?: "initializing" | "working" }
   | { status: "done"; result: unknown }
   | { status: "error"; message: string };
 
@@ -229,7 +229,9 @@ export async function checkManusTask(taskId: string): Promise<ManusTaskStatus> {
   );
 
   if (pollRes.status === 404) {
-    return { status: "running", pct: 10, message: "Starting...", detail: "Task is initializing" };
+    // Task not registered yet. Normal for the first few seconds, but a *persistent*
+    // 404 means a dead/invalid id — the client uses `phase` to bail after a grace window.
+    return { status: "running", pct: 10, message: "Starting...", detail: "Task is initializing", phase: "initializing" };
   }
 
   if (!pollRes.ok) {
@@ -247,7 +249,8 @@ export async function checkManusTask(taskId: string): Promise<ManusTaskStatus> {
   if (!agentStatus || agentStatus === "running" || agentStatus === "waiting") {
     const message = statusEvent?.status_update?.brief ?? "Manus is working...";
     const detail = statusEvent?.status_update?.description ?? "Processing";
-    return { status: "running", pct: 50, message, detail };
+    // 200 response => the task is registered and alive (working), not a dead id.
+    return { status: "running", pct: 50, message, detail, phase: "working" };
   }
 
   if (agentStatus === "error") {

@@ -1,3 +1,5 @@
+import { hostMatchesBlocklist, wordPresent } from "./leadDiscovery";
+
 export type OpportunityPriority = "A" | "B" | "C";
 
 export interface ResearchSource {
@@ -54,7 +56,7 @@ export const normalizeCompanyKey = (name: string, urlValue = "") => {
 export function isDiscoveryOnlySource(urlValue: string, titleValue = "") {
   const host = normalizeHost(urlValue);
   const title = String(titleValue || "").toLowerCase();
-  return !host || DIRECTORY_HOSTS.some(rejected => host === rejected || host.endsWith(`.${rejected}`) || host.includes(rejected)) ||
+  return !host || hostMatchesBlocklist(host, DIRECTORY_HOSTS) ||
     /\b(top|best)\s+\d+|\blist of\b|\bdirectory\b|\boutlets?\b.*\bprice\b|\breviews?\b.*\boutlets?\b|\bawards?\b/i.test(title);
 }
 
@@ -108,9 +110,10 @@ export function extractContiguousEvidence(pageText: string, signals: string[], r
       break;
     }
     const words = signal.split(/\s+/).filter(word => word.length > 3);
-    const word = words.find(value => lower.includes(value));
+    const word = words.find(value => wordPresent(lower, value));
     if (word) {
-      bestIndex = lower.indexOf(word);
+      const m = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:es|s)?\\b`).exec(lower);
+      bestIndex = m ? m.index : lower.indexOf(word);
       bestSignal = word;
       break;
     }
@@ -140,8 +143,8 @@ export function isTimelySignal(dateValue: string, now = new Date()) {
   return parsed >= oldest && parsed <= futureLimit;
 }
 
-export function assignOpportunityPriority(signalType: string, signalDate: string): OpportunityPriority {
-  if (!isTimelySignal(signalDate)) return "C";
+export function assignOpportunityPriority(signalType: string, signalDate: string, now = new Date()): OpportunityPriority {
+  if (!isTimelySignal(signalDate, now)) return "C";
   const normalized = normalizeSignalType(signalType);
   if (normalized === "expansion") return "A";
   if (["funding", "hiring", "commercial"].includes(normalized)) return "B";

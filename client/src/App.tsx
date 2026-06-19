@@ -101,6 +101,11 @@ export interface Lead {
   whyNow?: string;
   confidence?: number;
   verificationStatus?: string;
+  // Display-hygiene fields computed server-side (see server/leadDisplay.ts).
+  displayName?: string;
+  displayDomain?: string;
+  displayLocation?: string;
+  cleanEvidence?: string;
 }
 
 export interface MemoryItem {

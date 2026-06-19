@@ -31,6 +31,42 @@ function tokens(value: string): string[] {
   );
 }
 
+/**
+ * Does `host` match a blocklist entry, precisely?
+ *  - entry WITH a dot ("clutch.co")  -> exact or subdomain suffix match only.
+ *    So "clutch.co" blocks "clutch.co"/"x.clutch.co" but NOT real "clutch.com".
+ *  - entry WITHOUT a dot ("yellowpages") -> matches a whole domain label, so it
+ *    blocks "yellowpages.com"/"sg.yellowpages.com" but NOT "myyellowpages.com".
+ * Replaces the previous `host.includes(entry)` substring test, which falsely
+ * rejected legitimate sites whose host merely contained a blocked token.
+ */
+export function hostMatchesBlocklist(host: string, blocklist: string[]): boolean {
+  const h = String(host || "").toLowerCase().replace(/^www\./, "");
+  if (!h) return false;
+  const labels = h.split(".");
+  return blocklist.some(entry => {
+    const e = entry.toLowerCase();
+    if (e.includes(".")) return h === e || h.endsWith(`.${e}`);
+    return labels.includes(e);
+  });
+}
+
+/**
+ * Whole-word presence test that tolerates simple plurals but not unrelated
+ * words: `wordPresent("cold-plunge", "plunge")` -> true, "plunger" -> false,
+ * "spas" matches "spa", "categories" does NOT match "cat".
+ */
+export function wordPresent(text: string, word: string): boolean {
+  const w = String(word || "").toLowerCase().trim();
+  if (!w) return false;
+  const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Unicode-aware boundaries (ASCII \b would mis-handle accented/CJK words, e.g.
+  // "café"). Tolerates simple plurals (spa->spas) but not unrelated words (plunger).
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?:es|s)?(?![\\p{L}\\p{N}])`, "u").test(
+    String(text || "").toLowerCase(),
+  );
+}
+
 function overlap(queryTokens: Set<string>, values: string[]): string[] {
   const matches = new Set<string>();
   for (const value of values) {
@@ -75,7 +111,7 @@ export function matchMandatoryEvidence(pageText: string, signals: string[]): str
     const words = tokens(signal);
     if (!words.length) return false;
     const exact = normalized.includes(String(signal).toLowerCase().replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim());
-    const overlapCount = words.filter(word => normalized.includes(word)).length;
+    const overlapCount = words.filter(word => wordPresent(normalized, word)).length;
     return exact || overlapCount >= Math.ceil(words.length * 0.75);
   })));
 }
@@ -216,14 +252,7 @@ export function lowQualitySourceReason(
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   const path = url.pathname.toLowerCase();
   const title = titleValue.toLowerCase();
-  if (
-    REJECTED_HOSTS.some(
-      rejected =>
-        host === rejected ||
-        host.endsWith(`.${rejected}`) ||
-        host.includes(rejected)
-    )
-  ) {
+  if (hostMatchesBlocklist(host, REJECTED_HOSTS)) {
     return "directory, social, or aggregator host";
   }
   if (

@@ -7,6 +7,7 @@ import {
   type SupabaseUser,
 } from "./_core/supabaseAuth";
 import { lowQualitySourceReason, matchMandatoryEvidence, selectStrongestQueries, splitMemoryPolarity, stripLocationTerms } from "./leadDiscovery";
+import { deriveCompanyName, normalizeLeadDisplay } from "./leadDisplay";
 import {
   assignOpportunityPriority,
   buildResearchAudit,
@@ -664,6 +665,11 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
   if (!plannedQueries.length) return res.status(400).json({ error: "Manus returned no search plan" });
 
   const startedAt = Date.now();
+  // Vercel kills this function at maxDuration (60s). Keep the supplemental Exa
+  // calls inside a wall-clock budget so a slow batch can't blow past the limit;
+  // candidates past the budget fall back to evidence already gathered.
+  const EXA_BUDGET_MS = 45_000;
+  const withinExaBudget = () => Date.now() - startedAt < EXA_BUDGET_MS;
   try {
     const prerequisiteItems = Array.isArray(category?.mustHaveEvidence) ? category.mustHaveEvidence : [];
     const mandatorySignals = Array.from(new Set([
@@ -773,7 +779,7 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
       } else {
         candidates.set(key, {
           candidateKey: key,
-          name: String(companyProps.name || result.title || "").replace(/\s+[|\-–].*$/, "").trim(),
+          name: deriveCompanyName(companyProps.name, result.title, result.url).name,
           officialWebsite: result.url,
           operatingLocation: [companyProps.headquarters?.city, companyProps.headquarters?.country].filter(Boolean).join(", "),
           facilityClaim: "",
@@ -853,14 +859,14 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
       let facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
       const locationTerms = [city, candidate.operatingLocation].filter(Boolean).map(String);
       let locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
-      if (officialHost && evidenceTerms && !facilitySource) {
+      if (officialHost && evidenceTerms && !facilitySource && withinExaBudget()) {
         const officialResults = await fetchExa(`${candidate.name} ${evidenceTerms} ${city}`, [officialHost], 5);
         for (const result of officialResults) addResearchResult(result);
         sources = Array.from(sourcesByUrl.values()).slice(0, 8);
         facilitySource = sources.find(source => extractContiguousEvidence(source.pageText, evidenceSignals));
         locationSource = sources.find(source => source.sourceType !== "official-social" && extractContiguousEvidence(source.pageText, locationTerms));
       }
-      if (officialHost && facilitySource && !locationSource) {
+      if (officialHost && facilitySource && !locationSource && withinExaBudget()) {
         const locationResults = await fetchExa(`${candidate.name} ${city} address location opening hours contact`, [officialHost], 3);
         for (const result of locationResults) addResearchResult(result);
         sources = Array.from(sourcesByUrl.values()).slice(0, 8);
@@ -991,9 +997,11 @@ api.post("/api/lead-research/finalize", async (req: Request, res: Response) => {
         evaluation.opportunitySignalType,
         "expansion", "new location", "new branch", "opening", "launch", "construction", "funding", "hiring", "partnership", "procurement",
       ]) : "";
-      const evaluatedYear = String(evaluation.opportunitySignalDate || "").match(/\b20\d{2}\b/)?.[0] || "";
-      const sourceDate = String(signalSource?.publishedDate || "") ||
-        (evaluatedYear && signalSource?.pageText?.includes(evaluatedYear) ? String(evaluation.opportunitySignalDate) : "");
+      // Only trust a real publish date extracted from the source. The previous
+      // fallback accepted the model-claimed date whenever the page merely contained
+      // its YEAR (e.g. a "© 2024" footer), which manufactured false "why-now" signals.
+      // A lead with no verified date is not dropped — it just isn't marked timely.
+      const sourceDate = String(signalSource?.publishedDate || "");
       const supportedSignal = Boolean(
         signalSource && isAdmissibleResearchSource(signalSource) &&
         signalExcerpt && sourceDate && isTimelySignal(sourceDate) &&
@@ -1051,18 +1059,30 @@ api.post("/api/lead-research/finalize", async (req: Request, res: Response) => {
     const finalResults = verified
       .sort((a: any, b: any) => priorityWeight[b.opportunityPriority] - priorityWeight[a.opportunityPriority] || b.fitScore - a.fitScore || b.confidence - a.confidence)
       .slice(0, Math.min(8, Math.max(1, Number(numResults) || 8)));
-    const audit = buildResearchAudit({
-      discovered: Number(partialAudit.candidatesDiscovered) || 0,
-      exaRetrieved: Number(partialAudit.candidatesRetrievedByExa) || 0,
-      unique: Number(partialAudit.uniqueCompanies) || evidenceBundles.length,
-      evaluated: evidenceBundles.length,
-      rejected: Math.max(0, evidenceBundles.length - verified.length),
-      verified: verified.length,
-      signalBacked: verified.filter((lead: any) => lead.opportunitySignalType !== "none").length,
-      returned: finalResults.length,
-    });
+    // Display hygiene gate: attach clean display fields (name/domain/location/evidence)
+    // and drop any lead whose name is unsalvageable (no clean name AND no domain) so
+    // raw scrape text can never reach the UI.
+    const normalizedResults = finalResults.map((lead: any) => normalizeLeadDisplay(lead));
+    const visibleResults = normalizedResults.filter((lead: any) => !lead.quarantined);
+    const quarantinedCount = normalizedResults.length - visibleResults.length;
+    if (quarantinedCount > 0) {
+      console.log(`[lead-research] quarantined ${quarantinedCount} lead(s) with unrenderable names`);
+    }
+    const audit = {
+      ...buildResearchAudit({
+        discovered: Number(partialAudit.candidatesDiscovered) || 0,
+        exaRetrieved: Number(partialAudit.candidatesRetrievedByExa) || 0,
+        unique: Number(partialAudit.uniqueCompanies) || evidenceBundles.length,
+        evaluated: evidenceBundles.length,
+        rejected: Math.max(0, evidenceBundles.length - verified.length),
+        verified: verified.length,
+        signalBacked: verified.filter((lead: any) => lead.opportunitySignalType !== "none").length,
+        returned: visibleResults.length,
+      }),
+      quarantined: quarantinedCount,
+    };
     console.log(`[lead-research] finalized ${JSON.stringify(audit)}`);
-    return res.json({ status: "done", results: finalResults, audit, evaluationAudit, validationStatus: "manus-led" });
+    return res.json({ status: "done", results: visibleResults, audit, evaluationAudit, validationStatus: "manus-led" });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Lead research finalization failed" });
   }

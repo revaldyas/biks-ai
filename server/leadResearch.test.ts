@@ -90,9 +90,11 @@ describe("lead research evidence", () => {
 
 describe("lead research ranking and audit", () => {
   it("assigns priority only to dated, timely signals", () => {
-    expect(assignOpportunityPriority("new market expansion", "2026-05-01")).toBe("A");
-    expect(assignOpportunityPriority("hiring", "2026-03-01")).toBe("B");
-    expect(assignOpportunityPriority("expansion", "")).toBe("C");
+    const now = new Date("2026-06-01T00:00:00Z");  // fixed clock so the test never expires
+    expect(assignOpportunityPriority("new market expansion", "2026-05-01", now)).toBe("A");
+    expect(assignOpportunityPriority("hiring", "2026-03-01", now)).toBe("B");
+    expect(assignOpportunityPriority("expansion", "", now)).toBe("C");
+    expect(assignOpportunityPriority("expansion", "2020-01-01", now)).toBe("C");  // too old → not timely
   });
 
   it("reports evaluated and rejected counts without treating untouched candidates as rejected", () => {
