@@ -788,7 +788,7 @@ api.post("/api/lead-research/corroborate", async (req: Request, res: Response) =
       .filter(candidate => candidatePriority(candidate) > -20)
       .slice(0, 20);
 
-    const evidenceBundles = await mapInBatches(uniqueCandidates, 2, async candidate => {
+    const evidenceBundles = await mapInBatches(uniqueCandidates, 5, async candidate => {
       const officialHost = normalizeHost(candidate.officialWebsite || "");
       const evidenceTerms = evidenceSignals.slice(0, 5).join(" OR ");
       const [officialResults, signalResults] = await Promise.all([
