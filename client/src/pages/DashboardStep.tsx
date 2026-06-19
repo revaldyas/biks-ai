@@ -112,7 +112,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
               </ul>
             ) : (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-                {business.valueProposition.split(/(?:\n|(?<=\.)\s+(?=[A-Z]))/).map(s => s.trim()).filter(Boolean).slice(0, 3).map((s, i) => (
+                {(business.valueProposition || "").split(/(?:\n|(?<=\.)\s+(?=[A-Z]))/).map(s => s.trim()).filter(Boolean).slice(0, 3).map((s, i) => (
                   <li key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                     <span style={{ color: "var(--sage)", fontSize: 14, lineHeight: 1.6, flexShrink: 0 }}>•</span>
                     <span style={{ fontSize: 14, color: "var(--ink-3)", lineHeight: 1.6 }}>{s}</span>
@@ -152,7 +152,7 @@ export default function DashboardStep({ business, memories, setMemories, onSelec
               </div>
             ) : (
               <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {business.currentSegments.map((s, i) => (
+                {(business.currentSegments || []).map((s, i) => (
                   <li key={i} style={{
                     fontSize: 14, color: "var(--ink-3)", padding: "8px 0",
                     display: "flex", alignItems: "center", gap: 10,

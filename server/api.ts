@@ -2040,18 +2040,25 @@ Return ONLY valid JSON with this structure:
 // ============================================================
 // POST /api/send-email — Send outreach email via Resend
 // ============================================================
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
 api.post("/api/send-email", async (req: Request, res: Response) => {
-  const { subject, html, from } = req.body;
-  // Fixed recipient as configured
-  const to = "ngurah.linggih@gmail.com";
+  const { subject, html, to } = req.body;
+  const recipient = String(to || "").trim();
   if (!subject || !html) {
     return res.status(400).json({ ok: false, error: "subject and html are required" });
+  }
+  if (!isValidEmail(recipient)) {
+    return res.status(400).json({ ok: false, error: "a valid recipient email is required" });
   }
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ ok: false, error: "Resend not configured" });
   }
+  const replyTo = (req as Request & { user?: SupabaseUser }).user?.email;
 
   try {
     const resendRes = await fetch("https://api.resend.com/emails", {
@@ -2062,9 +2069,10 @@ api.post("/api/send-email", async (req: Request, res: Response) => {
       },
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL || "nura@biks.ai",
-        to,
+        to: recipient,
         subject,
         html,
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
 
@@ -2232,12 +2240,17 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
     return res.status(500).json({ ok: false, error: "Resend not configured" });
   }
 
-  const { business, lead, salesKit, contacts, painPoints } = req.body;
+  const { business, lead, salesKit, contacts, painPoints, to } = req.body;
   if (!business || !lead || !salesKit) {
     return res.status(400).json({ ok: false, error: "business, lead, and salesKit are required" });
   }
-
-  const to = "ngurah.linggih@gmail.com";
+  const recipient = String(to || "").trim();
+  if (!isValidEmail(recipient)) {
+    return res.status(400).json({ ok: false, error: "a valid recipient email is required" });
+  }
+  // Reply-To = the signed-in salesperson, so the prospect's reply reaches them
+  // (we must send `from` a Resend-verified domain, not an arbitrary address).
+  const replyTo = (req as Request & { user?: SupabaseUser }).user?.email;
   const subject = salesKit.outreachEmailSubject || `${business.companyName} \u00d7 ${lead.name} \u2014 Partnership Opportunity`;
 
   const htmlBody = buildKitEmailHtml(business, lead, salesKit, contacts || [], painPoints || []);
@@ -2251,9 +2264,10 @@ api.post("/api/send-kit-email", async (req: Request, res: Response) => {
       },
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL || "nura@biks.ai",
-        to,
+        to: recipient,
         subject,
         html: htmlBody,
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
 

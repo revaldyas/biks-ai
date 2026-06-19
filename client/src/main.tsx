@@ -4,6 +4,7 @@ import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import "./index.css";
 
@@ -42,9 +43,11 @@ const trpcClient = trpc.createClient({
 });
 
 createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </trpc.Provider>
+  <ErrorBoundary>
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </trpc.Provider>
+  </ErrorBoundary>
 );
