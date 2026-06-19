@@ -48,8 +48,8 @@ export default function HeroStep({ onComplete, onSignOut, trialDaysLeft, authed 
 
       const startTime = Date.now();
       while (true) {
-        if (Date.now() - startTime > 180_000) {
-          setError("Analysis timed out after 3 minutes. Please try again.");
+        if (Date.now() - startTime > 360_000) {
+          setError("Analysis timed out after 6 minutes. Please try again.");
           setLoading(false);
           break;
         }

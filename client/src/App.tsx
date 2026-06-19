@@ -244,7 +244,7 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       {step === 1 && (
         <HeroStep
           onComplete={async (data) => {
-            const normalized = { ...data, expansionCategories: [] };
+            const normalized = { ...data, expansionCategories: data.expansionCategories || [] };
             setBusiness(normalized);
             const id = await saveHistory("analysis", data.companyName, { business: normalized });
             if (id) setSessionId(id);
@@ -260,7 +260,6 @@ function BiksApp({ onSignOut, trialDaysLeft, authed, onRequireAuth }: { onSignOu
       {step === 2 && business && (
         <DashboardStep
           business={business}
-          setBusiness={setBusiness}
           memories={memories}
           setMemories={setMemories}
           onSelectCategory={(i) => { setInitialCategory(i); goToStep(3); }}

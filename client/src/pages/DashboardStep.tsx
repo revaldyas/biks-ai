@@ -6,23 +6,17 @@ import Tooltip from "../components/Tooltip";
 
 interface Props {
   business: BusinessProfile;
-  setBusiness: (business: BusinessProfile) => void;
   memories: MemoryItem[];
   setMemories: (m: MemoryItem[]) => void;
   onSelectCategory: (index: number) => void;
 }
 
-export default function DashboardStep({ business, setBusiness, memories, setMemories, onSelectCategory }: Props) {
+export default function DashboardStep({ business, memories, setMemories, onSelectCategory }: Props) {
   const isMobile = useIsMobile();
   const [memoryInput, setMemoryInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [generatingOpportunities, setGeneratingOpportunities] = useState(false);
-  const [opportunityError, setOpportunityError] = useState("");
-  const [contextDirty, setContextDirty] = useState(
-    business.expansionCategories.some(category => !category.mustHaveEvidence?.length),
-  );
 
   useEffect(() => {
     fetchMemories();
@@ -67,48 +61,7 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
     setDeletingId(null);
   };
 
-  const generateOpportunities = async () => {
-    setGeneratingOpportunities(true);
-    setOpportunityError("");
-    try {
-      const response = await apiFetch("/api/generate-opportunities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          business,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Opportunity discovery failed");
-      if (!data.taskId) throw new Error("Opportunity task did not start");
-
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < 360_000) {
-        await new Promise(resolve => setTimeout(resolve, 3_000));
-        const pollResponse = await apiFetch(`/api/poll-opportunities?id=${encodeURIComponent(data.taskId)}`);
-        const status = await pollResponse.json();
-        if (!pollResponse.ok) throw new Error(status.error || "Opportunity polling failed");
-        if (status.status === "error") throw new Error(status.message || "Opportunity discovery failed");
-        if (status.status !== "done") continue;
-
-        const expansionCategories = Array.isArray(status.expansionCategories) ? status.expansionCategories : [];
-        setBusiness({ ...business, expansionCategories });
-        setContextDirty(false);
-        if (!expansionCategories.length) {
-          setOpportunityError("No opportunity passed the website-evidence threshold. Try a website with more detailed product and customer information.");
-        }
-        return;
-      }
-      throw new Error("Opportunity discovery is still running after 6 minutes. Please retry.");
-    } catch (error) {
-      setOpportunityError(error instanceof Error ? error.message : "Opportunity discovery failed");
-    } finally {
-      setGeneratingOpportunities(false);
-    }
-  };
-
-  const opportunitiesReady = business.expansionCategories.length > 0
-    && business.expansionCategories.every(category => category.mustHaveEvidence?.length);
+  const opportunitiesReady = business.expansionCategories.length > 0;
 
   return (
     <div style={{ minHeight: "calc(100vh - 57px)", display: "flex", flexDirection: "column", animation: "fadeIn 0.3s ease" }}>
@@ -225,23 +178,18 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
               <Tooltip text="Adjacent markets this company could expand into. Pick one on the Leads page to find prospects." />
             </div>
             <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 16, marginLeft: 30 }}>
-              Evidence-backed markets derived from capabilities and saved context.
+              Evidence-backed markets derived from website capabilities.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {generatingOpportunities && (
-                <div style={{ padding: "22px 14px", color: "var(--ink-3)", fontSize: 13 }}>
-                  Testing transferable capabilities against new buyer conditions...
-                </div>
-              )}
-              {!generatingOpportunities && business.expansionCategories.length === 0 && (
+              {business.expansionCategories.length === 0 && (
                 <div style={{ padding: "16px 14px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)" }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>Ready to find opportunities</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>No evidence-backed opportunity found</div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
-                    Continue using the website capability model.
+                    The website did not provide enough evidence for a reliable adjacent market.
                   </div>
                 </div>
               )}
-              {!generatingOpportunities && business.expansionCategories.slice(0, 3).map((cat, i) => (
+              {business.expansionCategories.slice(0, 3).map((cat, i) => (
                 <div
                   key={i}
                   style={{
@@ -261,30 +209,23 @@ export default function DashboardStep({ business, setBusiness, memories, setMemo
                 </div>
               ))}
             </div>
-            {opportunityError && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>{opportunityError}</div>}
           </div>
         </div>
 
         {/* Primary CTA — market selection happens on the Leads page */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 24 }}>
           <button
-            onClick={() => opportunitiesReady && !contextDirty ? onSelectCategory(0) : generateOpportunities()}
-            disabled={generatingOpportunities}
+            onClick={() => onSelectCategory(0)}
+            disabled={!opportunitiesReady}
             style={{
               background: "var(--action)", color: "var(--action-fg)",
               border: "none", borderRadius: "var(--radius-md)",
               padding: "13px 32px", fontSize: 15, fontWeight: 600,
-              cursor: generatingOpportunities ? "wait" : "pointer", fontFamily: "var(--font-sans)",
-              opacity: generatingOpportunities ? 0.65 : 1,
+              cursor: opportunitiesReady ? "pointer" : "not-allowed", fontFamily: "var(--font-sans)",
+              opacity: opportunitiesReady ? 1 : 0.5,
             }}
           >
-            {generatingOpportunities
-              ? "Finding Opportunities..."
-              : opportunitiesReady && !contextDirty
-                ? "Generate Leads"
-                : business.expansionCategories.length > 0
-                  ? "Refresh Opportunities"
-                  : "Find Opportunities"}
+            Choose Market and Location
           </button>
         </div>
 
