@@ -188,29 +188,53 @@ export async function startManusTask(
   if (!apiKey) throw new Error("MANUS_API_KEY is not configured");
 
   const hdrs = { "Content-Type": "application/json", "x-manus-api-key": apiKey };
-  for (const useStructuredOutput of [true, false]) {
-    const createRes = await fetch(`${BASE}/task.create`, {
-      method: "POST",
-      headers: hdrs,
-      body: JSON.stringify({
-        message: { content: prompt },
-        ...(useStructuredOutput ? { structured_output_schema: schema } : {}),
-        agent_profile: options.profile || AGENT_PROFILE,
-      }),
-    });
+  // Retry transient Manus failures (5xx / 429 / network) — task.create returns a
+  // momentary 500 "failed to create task" under load. Also fall back to an
+  // unstructured task if Manus rejects the schema with a 400.
+  let useStructuredOutput = true;
+  let lastErr = "task.create error";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let createRes: Response;
+    try {
+      createRes = await fetch(`${BASE}/task.create`, {
+        method: "POST",
+        headers: hdrs,
+        body: JSON.stringify({
+          message: { content: prompt },
+          ...(useStructuredOutput ? { structured_output_schema: schema } : {}),
+          agent_profile: options.profile || AGENT_PROFILE,
+        }),
+      });
+    } catch (e: any) {
+      lastErr = `network: ${e?.message ?? e}`;
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      continue;
+    }
 
     if (createRes.ok) {
-      const created: any = await createRes.json();
-      if (created.ok) return created.task_id as string;
-      throw new Error(`Manus: ${created.error?.message ?? "task.create error"}`);
+      const created: any = await createRes.json().catch(() => null);
+      if (created?.ok) return created.task_id as string;
+      throw new Error(`Manus: ${created?.error?.message ?? "task.create error"}`);
     }
 
     const txt = await createRes.text().catch(() => "");
-    const canFallback = useStructuredOutput && createRes.status === 400 && /invalid_argument|structured|unexpected error/i.test(txt);
-    if (!canFallback) throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
+    lastErr = `${createRes.status}: ${txt}`;
+
+    // Schema rejected -> retry immediately without it.
+    if (useStructuredOutput && createRes.status === 400 && /invalid_argument|structured|unexpected error/i.test(txt)) {
+      useStructuredOutput = false;
+      continue;
+    }
+    // Transient server / rate-limit error -> back off and retry.
+    if (createRes.status === 429 || createRes.status >= 500) {
+      await new Promise(r => setTimeout(r, createRes.status === 429 ? 6000 : 1000 * (attempt + 1)));
+      continue;
+    }
+    // Non-retryable client error.
+    throw new Error(`Manus task.create failed (${createRes.status}): ${txt}`);
   }
 
-  throw new Error("Manus task.create failed after schema fallback");
+  throw new Error(`Manus task.create failed after retries (${lastErr})`);
 }
 
 export type ManusTaskStatus =

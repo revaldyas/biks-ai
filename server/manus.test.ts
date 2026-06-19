@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { manusTask } from "./_core/manus";
+import { manusTask, startManusTask } from "./_core/manus";
 
 describe("Manus task creation", () => {
   const originalKey = process.env.MANUS_API_KEY;
@@ -41,5 +41,22 @@ describe("Manus task creation", () => {
     expect(requests[0].body.structured_output_schema).toBeDefined();
     expect(requests[1].body.structured_output_schema).toBeUndefined();
     expect(requests[1].body.message.content).toBe("Return JSON");
+  });
+
+  it("retries task.create after a transient Manus 5xx instead of failing", async () => {
+    process.env.MANUS_API_KEY = "test-manus-key";
+    let calls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // the exact failure seen in production
+        return new Response(JSON.stringify({ error: { code: "internal", message: "failed to create task" }, ok: false }), { status: 500 });
+      }
+      return new Response(JSON.stringify({ ok: true, task_id: "task-after-retry" }), { status: 200 });
+    });
+
+    const id = await startManusTask("Plan the search", { type: "object" });
+    expect(id).toBe("task-after-retry");
+    expect(calls).toBe(2); // failed once, recovered on retry
   });
 });
