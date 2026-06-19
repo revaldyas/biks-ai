@@ -54,6 +54,17 @@ export default function AccountsStep({
   const [rejectReason, setRejectReason] = useState("");
   const [deletingMemId, setDeletingMemId] = useState<string | null>(null);
 
+  const readApiData = async (response: Response, fallbackMessage: string) => {
+    const text = await response.text();
+    if (!text.trim()) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      const message = text.replace(/\s+/g, " ").trim().slice(0, 240);
+      throw new Error(`${fallbackMessage}${response.status ? ` (${response.status})` : ""}: ${message || "Server returned a non-JSON response."}`);
+    }
+  };
+
   const searchLeads = async () => {
     setSearching(true);
     const cat = business.expansionCategories[selectedCategory];
@@ -72,14 +83,14 @@ export default function AccountsStep({
           memories: memories.map(m => m.text),
         }),
       });
-      const startData = await startRes.json();
+      const startData = await readApiData(startRes, "Lead research failed to start");
       if (!startRes.ok) throw new Error(startData.error || "Lead research failed to start");
 
       let discovery: any = null;
       for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         const pollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(startData.taskId)}`);
-        const pollData = await pollRes.json();
+        const pollData = await readApiData(pollRes, "Manus search planning failed");
         if (!pollRes.ok || pollData.error) throw new Error(pollData.error || "Manus search planning failed");
         if (pollData.status === "error") throw new Error(pollData.message || "Manus search planning failed");
         if (pollData.status === "done") { discovery = pollData.result; break; }
@@ -100,7 +111,7 @@ export default function AccountsStep({
           memories: memories.map(m => m.text),
         }),
       });
-      const corroborateData = await corroborateRes.json();
+      const corroborateData = await readApiData(corroborateRes, "Evidence corroboration failed");
       if (!corroborateRes.ok) throw new Error(corroborateData.error || "Evidence corroboration failed");
 
       setSearchMessage("Manus is comparing verified candidates and ranking why-now opportunities...");
@@ -108,7 +119,7 @@ export default function AccountsStep({
       for (let attempt = 0; attempt < 240; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         const rankPollRes = await apiFetch(`/api/lead-research/poll?id=${encodeURIComponent(corroborateData.taskId)}`);
-        const rankPollData = await rankPollRes.json();
+        const rankPollData = await readApiData(rankPollRes, "Strategic ranking failed");
         if (!rankPollRes.ok || rankPollData.error) throw new Error(rankPollData.error || "Strategic ranking failed");
         if (rankPollData.status === "error") throw new Error(rankPollData.message || "Strategic ranking failed");
         if (rankPollData.status === "done") { rankingResult = rankPollData.result; break; }
@@ -126,7 +137,7 @@ export default function AccountsStep({
           memories: memories.map(m => m.text),
         }),
       });
-      const data = await finalRes.json();
+      const data = await readApiData(finalRes, "Lead finalization failed");
       if (!finalRes.ok || data.error) throw new Error(data.error || "Lead finalization failed");
       setSearchAudit(data.audit || null);
       setSearchMessage(data.results?.length ? "" : "No companies passed every facility, location, operating, and buyer verification check.");
